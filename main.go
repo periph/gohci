@@ -41,8 +41,6 @@ type config struct {
 	WebHookSecret     string   // https://developer.github.com/webhooks/
 	Oauth2AccessToken string   // https://github.com/settings/tokens, check "repo:status" and "gist"
 	UseSSH            bool     // Use ssh (instead of https) for checkout. Required for private repositories.
-	Owners            []string // Allowed users to run tests on.
-	Branches          []string // Branches that tests will be run on.
 	Name              string   // Display name to use in the status report on Github.
 	Check             []string // Command to run to test the repository. It is run from the repository's root.
 }
@@ -53,24 +51,21 @@ func loadConfig() (*config, error) {
 		WebHookSecret:     "Create a secret and set it at github.com/'name'/'repo'/settings/hooks",
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
 		UseSSH:            false,
-		Owners:            []string{"joe"},
-		Branches:          []string{"refs/heads/master"},
 		Name:              "sci",
 		Check:             []string{"go", "test"},
 	}
 	b, err := ioutil.ReadFile("sci.json")
 	if err != nil {
-		// Write a default file and exit.
 		b, err = json.MarshalIndent(c, "", "  ")
 		if err != nil {
 			return nil, err
 		}
-		if err := ioutil.WriteFile("sci.json", b, 0600); err != nil {
+		if err = ioutil.WriteFile("sci.json", b, 0600); err != nil {
 			return nil, err
 		}
 		return nil, errors.New("wrote new sci.json")
 	}
-	if err := json.Unmarshal(b, c); err != nil {
+	if err = json.Unmarshal(b, c); err != nil {
 		return nil, err
 	}
 	d, err := json.MarshalIndent(c, "", "  ")
@@ -154,10 +149,31 @@ func runCheck(cmd []string, repoName string, useSSH bool, commit, gopath string)
 }
 
 type server struct {
-	c      *config
-	client *github.Client
-	gopath string
-	mu     sync.Mutex
+	c       *config
+	client  *github.Client
+	gopath  string
+	mu      sync.Mutex
+	collabs map[string]map[string]bool
+}
+
+func (s *server) canCollab(owner, repo, user string) bool {
+	key := owner + "/" + repo
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.collabs[key]; !ok {
+		s.collabs[key] = map[string]bool{}
+	}
+	if v, ok := s.collabs[key][user]; ok {
+		return v
+	}
+	v, _, _ := s.client.Repositories.IsCollaborator(owner, repo, user)
+	if v {
+		// Only cache hits because otherwise adding a collaborator would mean
+		// restarting every sci instances.
+		s.collabs[key][user] = v
+	}
+	log.Printf("- %s: %s access: %t", key, user, v)
+	return v
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -185,25 +201,16 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("- PR #%d %s %s", *event.PullRequest.ID, *event.Sender.Login, *event.Action)
 		if *event.Action != "opened" && *event.Action != "synchronized" {
 			log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
-			io.WriteString(w, "{}")
-			return
-		}
-		if !isInList(*event.Sender.Login, s.c.Owners) {
+		} else if !s.canCollab(*event.Repo.Owner.Login, *event.Repo.Name, *event.Sender.Login) {
 			log.Printf("- ignoring owner %q for PR", *event.Sender.Login)
-			io.WriteString(w, "{}")
-			return
-		}
-		if err := s.runCheck(*event.Repo.FullName, *event.PullRequest.Head.SHA); err != nil {
+		} else if err := s.runCheck(*event.Repo.FullName, *event.PullRequest.Head.SHA); err != nil {
 			log.Printf("- %v")
 		}
 	case *github.PushEvent:
 		log.Printf("- Push %s %s", *event.Ref, *event.HeadCommit.ID)
-		if !isInList(*event.Ref, s.c.Branches) {
+		if !strings.HasPrefix(*event.Ref, "refs/heads/") {
 			log.Printf("- ignoring branch %q for push", *event.Ref)
-			io.WriteString(w, "{}")
-			return
-		}
-		if err := s.runCheck(*event.Repo.FullName, *event.HeadCommit.ID); err != nil {
+		} else if err := s.runCheck(*event.Repo.FullName, *event.HeadCommit.ID); err != nil {
 			log.Printf("- %v")
 		}
 	default:
@@ -269,7 +276,7 @@ func mainImpl() error {
 	}
 
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
-	s := server{c: c, client: github.NewClient(tc), gopath: gopath}
+	s := server{c: c, client: github.NewClient(tc), gopath: gopath, collabs: map[string]map[string]bool{}}
 	http.Handle("/", &s)
 	log.Printf("Running in %s", wd)
 	log.Printf("Listening on %d", c.Port)

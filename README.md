@@ -37,12 +37,6 @@ This  will create `sci.json` similar to the following:
   "WebHookSecret": "Create a secret and set it at github.com/'name'/'repo'/settings/hooks",
   "Oauth2AccessToken": "Get one at https://github.com/settings/tokens",
   "UseSSH": false,
-  "Owners": [
-    "joe"
-  ],
-  "Branches": [
-    "refs/heads/master"
-  ],
   "Name": "sci",
   "Check": [
     "go",
