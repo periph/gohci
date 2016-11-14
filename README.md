@@ -61,8 +61,8 @@ Visit to `github.com/<name>/<repo>/settings/hooks` and create a new webhook.
 
 - Use your worker IP address as the hook URL, `https://1.2.3.4/postreceive`.
 - Type a random string, that you will put in `WebHookSecret` in `sci.json`.
-- Click `Let me select individual events` and check only `Pull request` and
-  `Push`.
+- Click `Let me select individual events` and check: ``Commit comment`, `Pull
+  request`, `Pull request review comment` and `Push`.
 
 
 ### systemd
