@@ -227,10 +227,15 @@ func (s *server) runCheck(repo, commit string) error {
 	defer s.mu.Unlock()
 	log.Printf("- Running test for %s at %s", repo, commit)
 	metadata, out, success := runCheck(s.c.Check, repo, s.c.UseSSH, commit, s.gopath)
-
+	if metadata == "" {
+		metadata = "<missing>"
+	}
+	if out == "" {
+		out = "<missing>"
+	}
 	// https://developer.github.com/v3/gists/#create-a-gist
 	gist := &github.Gist{
-		Description: github.String("output for https://github.com/" + repo + "/commit/" + commit),
+		Description: github.String("Output for https://github.com/" + repo + "/commit/" + commit),
 		// It is still accessible via the URL;
 		Public: github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
