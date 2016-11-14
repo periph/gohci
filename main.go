@@ -21,6 +21,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -32,6 +33,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bugsnag/osext"
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
 )
@@ -72,7 +74,6 @@ func loadConfig() (*config, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Update the file in canonical format.
 	if !bytes.Equal(b, d) {
 		log.Printf("Updating sci.json in canonical format")
 		if err := ioutil.WriteFile("sci.json", d, 0600); err != nil {
@@ -94,9 +95,7 @@ func run(cwd string, cmd ...string) (string, bool) {
 	return fmt.Sprintf("$ %s\nin %s\n%s", cmds, duration, string(out)), err == nil
 }
 
-// runCheck syncs then runs the check.
-//
-// It runs the check in a temporary GOPATH at the specified commit.
+// runCheck syncs then runs the check and returns task's metadata and stdout.
 func runCheck(cmd []string, repoName string, useSSH bool, commit, gopath string) (string, string, bool) {
 	metadata := fmt.Sprintf("Commit: %s\nVersion: %s\nGOROOT: %s\nGOPATH: %s\nCPUs: %d\n---\n",
 		commit, runtime.Version(), runtime.GOROOT(), gopath, runtime.NumCPU())
@@ -180,8 +179,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("- invalid secret")
 		return
 	}
-	t := github.WebHookType(r)
-	if t != "ping" {
+	if t := github.WebHookType(r); t != "ping" {
 		event, err := github.ParseWebHook(t, payload)
 		if err != nil {
 			http.Error(w, "Invalid payload", http.StatusBadRequest)
@@ -223,6 +221,8 @@ func (s *server) runCheck(repo, commit string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	log.Printf("- Running test for %s at %s", repo, commit)
+	// TODO(maruel): Update the gist as the task is running;
+	// https://developer.github.com/v3/gists/#edit-a-gist
 	metadata, out, success := runCheck(s.c.Check, repo, s.c.UseSSH, commit, s.gopath)
 	if metadata == "" {
 		metadata = "<missing>"
@@ -288,9 +288,23 @@ func mainImpl() error {
 		return s.runCheck(*test, *commit)
 	}
 	http.Handle("/", &s)
-	log.Printf("Running in %s", wd)
-	log.Printf("Listening on %d", c.Port)
-	return http.ListenAndServe(fmt.Sprintf(":%d", c.Port), nil)
+	thisFile, err := osext.Executable()
+	if err != nil {
+		return err
+	}
+	log.Printf("Running in: %s", wd)
+	log.Printf("Executable: %s", thisFile)
+	log.Printf("Listening on: %d", c.Port)
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", c.Port))
+	if err != nil {
+		return err
+	}
+	server := &http.Server{Addr: ln.Addr().String()}
+	go server.ListenAndServe()
+	err = watchFile(thisFile)
+	// Ensures no task is running.
+	s.mu.Lock()
+	return err
 }
 
 func main() {

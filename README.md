@@ -88,11 +88,10 @@ Environment=PATH=/home/pi/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/b
 
 ## Updating
 
-Note that this will break currently running tests.
+Recompiling will trigger an automatic service restart, so simply run:
 
 ```
 go get -u github.com/maruel/sci
-sudo systemctl restart sci
 ```
 
 
