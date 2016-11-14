@@ -303,13 +303,14 @@ func mainImpl() error {
 	}
 	log.Printf("Running in: %s", wd)
 	log.Printf("Executable: %s", thisFile)
-	log.Printf("Listening on: %d", c.Port)
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", c.Port))
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Addr: ln.Addr().String()}
-	go server.ListenAndServe()
+	a := ln.Addr().String()
+	ln.Close()
+	log.Printf("Listening on: %s", a)
+	go http.ListenAndServe(a, nil)
 	err = watchFile(thisFile)
 	// Ensures no task is running.
 	s.mu.Lock()
