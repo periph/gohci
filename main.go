@@ -93,7 +93,7 @@ func run(cwd string, cmd ...string) (string, bool) {
 	out, err := c.CombinedOutput()
 	duration := time.Since(start)
 	// Assumes UTF-8.
-	return fmt.Sprintf("$ %s  (in %s)%s", cmds, duration, string(out)), err == nil
+	return fmt.Sprintf("$ %s  (%s)\n%s", cmds, duration, string(out)), err == nil
 }
 
 // runChecks syncs then runs the checks and returns task's results.
