@@ -37,7 +37,7 @@ import (
 )
 
 type config struct {
-	Port              int
+	Port              int      // TCP port number for HTTP server.
 	WebHookSecret     string   // https://developer.github.com/webhooks/
 	Oauth2AccessToken string   // https://github.com/settings/tokens, check "repo:status" and "gist"
 	UseSSH            bool     // Use ssh (instead of https) for checkout. Required for private repositories.
