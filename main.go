@@ -238,7 +238,7 @@ func (s *server) runCheck(repo, commit string) error {
 	status := &github.RepoStatus{
 		State:       github.String("success"),
 		TargetURL:   gist.HTMLURL,
-		Description: github.String("ran test"),
+		Description: github.String(fmt.Sprintf("Ran: %s", strings.Join(s.c.Check, " "))),
 		Context:     github.String("sci"),
 	}
 	if !success {
