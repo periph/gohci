@@ -202,11 +202,15 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				log.Printf("- %v", err)
 			}
 		case *github.PushEvent:
-			log.Printf("- Push %s %s", *event.Ref, *event.HeadCommit.ID)
-			if !strings.HasPrefix(*event.Ref, "refs/heads/") {
-				log.Printf("- ignoring branch %q for push", *event.Ref)
-			} else if err = s.runCheck(*event.Repo.FullName, *event.HeadCommit.ID); err != nil {
-				log.Printf("- %v", err)
+			if event.HeadCommit == nil {
+				log.Printf("- Push %s <deleted>", *event.Ref)
+			} else {
+				log.Printf("- Push %s %s", *event.Ref, *event.HeadCommit.ID)
+				if !strings.HasPrefix(*event.Ref, "refs/heads/") {
+					log.Printf("- ignoring branch %q for push", *event.Ref)
+				} else if err = s.runCheck(*event.Repo.FullName, *event.HeadCommit.ID); err != nil {
+					log.Printf("- %v", err)
+				}
 			}
 		default:
 			log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
