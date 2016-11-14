@@ -100,6 +100,7 @@ func run(cwd string, cmd ...string) (string, bool) {
 
 type file struct {
 	name, content string
+	success       bool
 }
 
 func metadata(commit, gopath string) string {
@@ -125,14 +126,14 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 		stdout, ok := run(up, "git", "clone", "--quiet", url)
 		setup = stdout
 		if !ok {
-			results <- file{"setup", setup}
+			results <- file{"setup", setup, ok}
 			return ok
 		}
 	} else {
 		stdout, ok := run(base, "git", "fetch", "--prune", "--quiet")
 		setup = stdout
 		if !ok {
-			results <- file{"setup", setup}
+			results <- file{"setup", setup, ok}
 			return ok
 		}
 	}
@@ -148,12 +149,12 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 			setup += stdout
 		}
 	}
-	results <- file{"setup", setup}
+	results <- file{"setup", setup, ok}
 	if ok {
 		// Finally run the checks!
 		for i, cmd := range cmds {
 			stdout, ok2 := run(base, cmd...)
-			results <- file{fmt.Sprintf("cmd%d", i+1), stdout}
+			results <- file{fmt.Sprintf("cmd%d", i+1), stdout, ok2}
 			if !ok2 {
 				ok = false
 			}
@@ -272,6 +273,9 @@ func (s *server) runCheck(repo, commit string) error {
 			if len(i.content) == 0 {
 				i.content = "<missing>"
 			}
+			if !i.success {
+				i.name += " (failed)"
+			}
 			gist.Files = map[github.GistFilename]github.GistFile{github.GistFilename(i.name): github.GistFile{Content: &i.content}}
 			if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
 				// Just move on.
@@ -331,6 +335,9 @@ func mainImpl() error {
 			go func() {
 				defer wg.Done()
 				for i := range results {
+					if !i.success {
+						i.name += " (failed)"
+					}
 					fmt.Printf("--- %s\n%s", i.name, i.content)
 				}
 			}()
