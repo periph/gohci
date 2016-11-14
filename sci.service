@@ -1,0 +1,35 @@
+# Copyright 2016 Marc-Antoine Ruel. All rights reserved.
+# Use of this source code is governed under the Apache License, Version 2.0
+# that can be found in the LICENSE file.
+
+# Copy to /etc/systemd/system/sci.service
+# Then run:
+#   systemctl daemon-reload
+#   systemctl enable sci.service
+#   systemctl start sci.service
+#
+# To view logs:
+#   journalctl -u sci.service
+
+# All the flags in the following help pages apply:
+# - https://www.freedesktop.org/software/systemd/man/systemd.exec.html
+# - https://www.freedesktop.org/software/systemd/man/systemd.kill.html
+# - https://www.freedesktop.org/software/systemd/man/systemd.service.html
+# - https://www.freedesktop.org/software/systemd/man/systemd.unit.html
+
+[Unit]
+Description=Shameful CI
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=pi
+Group=pi
+KillMode=mixed
+Restart=always
+TimeoutStopSec=20s
+ExecStart=/home/pi/bin/sci
+WorkingDirectory=/home/pi/sci
+
+[Install]
+WantedBy=multi-user.target

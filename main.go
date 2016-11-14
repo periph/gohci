@@ -13,11 +13,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -30,56 +32,56 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/oauth2"
-
 	"github.com/google/go-github/github"
+	"golang.org/x/oauth2"
 )
 
 type config struct {
-	Port          int
-	WebHookSecret string // https://developer.github.com/webhooks/
-	AccessToken   string // https://github.com/settings/tokens, check "repo:status" and "gist"
-	UseSSH        bool
-	Owners        []string
-	Branches      []string
-	Repo          string
-	Name          string // Name to use in the status.
-	Check         []string
-	GOPATH        string
+	Port              int
+	WebHookSecret     string   // https://developer.github.com/webhooks/
+	Oauth2AccessToken string   // https://github.com/settings/tokens, check "repo:status" and "gist"
+	UseSSH            bool     // Use ssh (instead of https) for checkout. Required for private repositories.
+	Owners            []string // Allowed users to run tests on.
+	Branches          []string // Branches that tests will be run on.
+	Name              string   // Display name to use in the status report on Github.
+	Check             []string // Command to run to test the repository. It is run from the repository's root.
 }
 
 func loadConfig() (*config, error) {
 	c := &config{
-		Port:          8080,
-		WebHookSecret: "secret",
-		AccessToken:   "token",
-		Owners:        []string{"joe"},
-		Branches:      []string{"refs/heads/master"},
-		Repo:          "github.com/example/todo",
-		Name:          "sci",
-		Check:         []string{"go", "test"},
-		GOPATH:        "sci-tmp",
+		Port:              8080,
+		WebHookSecret:     "Create a secret and set it at github.com/'name'/'repo'/settings/hooks",
+		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
+		UseSSH:            false,
+		Owners:            []string{"joe"},
+		Branches:          []string{"refs/heads/master"},
+		Name:              "sci",
+		Check:             []string{"go", "test"},
 	}
-	f, err := os.Open("sci.json")
+	b, err := ioutil.ReadFile("sci.json")
 	if err != nil {
 		// Write a default file and exit.
-		f, err := os.Create("sci.json")
+		b, err = json.MarshalIndent(c, "", "  ")
 		if err != nil {
 			return nil, err
 		}
-		defer f.Close()
-		b, _ := json.MarshalIndent(c, "", "  ")
-		if _, err := f.Write(b); err != nil {
+		if err := ioutil.WriteFile("sci.json", b, 0600); err != nil {
 			return nil, err
 		}
 		return nil, errors.New("wrote new sci.json")
 	}
-	defer f.Close()
-	if err := json.NewDecoder(f).Decode(c); err != nil {
+	if err := json.Unmarshal(b, c); err != nil {
 		return nil, err
 	}
-	if c.GOPATH, err = filepath.Abs(c.GOPATH); err != nil {
+	d, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
 		return nil, err
+	}
+	// Update the file in canonical format.
+	if !bytes.Equal(b, d) {
+		if err := ioutil.WriteFile("sci.json", b, 0600); err != nil {
+			return nil, err
+		}
 	}
 	return c, nil
 }
@@ -94,21 +96,11 @@ func isInList(i string, list []string) bool {
 	return false
 }
 
-func newBool(b bool) *bool {
-	return &b
-}
-
-func newString(s string) *string {
-	return &s
-}
-
-func run(cwd string, env []string, cmd ...string) (string, bool) {
+func run(cwd string, cmd ...string) (string, bool) {
 	cmds := strings.Join(cmd, " ")
 	log.Printf("- cwd=%s : %s", cwd, cmds)
 	c := exec.Command(cmd[0], cmd[1:]...)
-	if cwd != "" {
-		c.Dir = cwd
-	}
+	c.Dir = cwd
 	start := time.Now()
 	out, err := c.CombinedOutput()
 	duration := time.Since(start)
@@ -116,10 +108,10 @@ func run(cwd string, env []string, cmd ...string) (string, bool) {
 	return fmt.Sprintf("$ %s\nin %s\n%s", cmds, duration, string(out)), err == nil
 }
 
-// runC runs the check.
+// runCheck syncs then runs the check.
 //
 // It runs the check in a temporary GOPATH at the specified commit.
-func runC(env, cmd []string, repoName string, useSSH bool, commit, gopath string) (string, string, bool) {
+func runCheck(cmd []string, repoName string, useSSH bool, commit, gopath string) (string, string, bool) {
 	metadata := fmt.Sprintf("Commit: %s\nVersion: %s\nGOROOT: %s\nGOPATH: %s\nCPUs: %d\n---\n",
 		commit, runtime.Version(), runtime.GOROOT(), gopath, runtime.NumCPU())
 	repoPath := "github.com/" + repoName
@@ -133,62 +125,63 @@ func runC(env, cmd []string, repoName string, useSSH bool, commit, gopath string
 		if useSSH {
 			url = "git@github.com:" + repoName
 		}
-		out1, ok := run(up, env, "git", "clone", "--quiet", url)
+		out1, ok := run(up, "git", "clone", "--quiet", url)
 		metadata += out1
 		if !ok {
 			return metadata, "", ok
 		}
 	} else {
-		out1, ok := run(base, env, "git", "fetch", "--prune", "--quiet")
+		out1, ok := run(base, "git", "fetch", "--prune", "--quiet")
 		metadata += out1
 		if !ok {
 			return metadata, "", ok
 		}
 	}
-	out1, ok := run(base, env, "git", "checkout", "--quiet", commit)
+	out1, ok := run(base, "git", "checkout", "--quiet", commit)
 	metadata += out1
 	if !ok {
 		return metadata, "", ok
 	}
 	// TODO(maruel): update dependencies manually.
-	out1, ok = run(gopath, env, "go", "get", "-v", "-d", repoPath)
+	out1, ok = run(gopath, "go", "get", "-v", "-d", repoPath)
 	metadata += out1
 	if !ok {
 		return metadata, "", ok
 	}
-	out, ok := run(base, env, cmd...)
+	out, ok := run(base, cmd...)
 	return metadata, out, ok
 }
 
 type server struct {
 	c      *config
 	client *github.Client
-	env    []string
+	gopath string
 	mu     sync.Mutex
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Printf("HTTP: %s %s", r.RemoteAddr, r.URL.Path)
 	defer r.Body.Close()
 	if r.Method != "POST" {
 		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
-		log.Printf("Invalid method")
+		log.Printf("- invalid method")
 		return
 	}
 	payload, err := github.ValidatePayload(r, []byte(s.c.WebHookSecret))
 	if err != nil {
 		http.Error(w, "Invalid secret", http.StatusUnauthorized)
-		log.Printf("Invalid secret")
+		log.Printf("- invalid secret")
 		return
 	}
 	event, err := github.ParseWebHook(github.WebHookType(r), payload)
 	if err != nil {
 		http.Error(w, "Invalid payload", http.StatusBadRequest)
-		log.Printf("Invalid payload")
+		log.Printf("- invalid payload")
 		return
 	}
-	log.Printf("%s", reflect.TypeOf(event).Elem().Name())
 	switch event := event.(type) {
 	case *github.PullRequestEvent:
+		log.Printf("- PR #%d %s %s", *event.PullRequest.ID, *event.Sender.Login, *event.Action)
 		if *event.Action != "opened" && *event.Action != "synchronized" {
 			log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
 			io.WriteString(w, "{}")
@@ -203,6 +196,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("- %v")
 		}
 	case *github.PushEvent:
+		log.Printf("- Push #%d %s", *event.PushID, *event.Ref)
 		if !isInList(*event.Ref, s.c.Branches) {
 			log.Printf("- ignoring branch %q for push", *event.Ref)
 			io.WriteString(w, "{}")
@@ -212,7 +206,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("- %v")
 		}
 	default:
-		log.Printf("Invalid payload")
+		log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
 	}
 	io.WriteString(w, "{}")
 }
@@ -221,13 +215,13 @@ func (s *server) runCheck(repo, commit string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	log.Printf("- Running test for %s at %s", repo, commit)
-	metadata, out, success := runC(s.env, s.c.Check, repo, s.c.UseSSH, commit, s.c.GOPATH)
+	metadata, out, success := runCheck(s.c.Check, repo, s.c.UseSSH, commit, s.gopath)
 
 	// https://developer.github.com/v3/gists/#create-a-gist
 	gist := &github.Gist{
-		Description: newString("output for https://github.com/" + repo + "/commit/" + commit),
+		Description: github.String("output for https://github.com/" + repo + "/commit/" + commit),
 		// It is still accessible via the URL;
-		Public: newBool(false),
+		Public: github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
 			"metadata": github.GistFile{Content: &metadata},
 			"stdout":   github.GistFile{Content: &out},
@@ -238,51 +232,45 @@ func (s *server) runCheck(repo, commit string) error {
 		return err
 	}
 	log.Printf("- Gist at %s", *gist.HTMLURL)
+
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
-		State:       newString("success"),
+		State:       github.String("success"),
 		TargetURL:   gist.HTMLURL,
-		Description: newString("ran test"),
-		Context:     newString("sci"),
+		Description: github.String("ran test"),
+		Context:     github.String("sci"),
 	}
 	if !success {
-		status.State = newString("failure")
+		status.State = github.String("failure")
 	}
 	parts := strings.SplitN(repo, "/", 2)
-	status, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status)
+	_, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status)
 	return err
 }
 
 func mainImpl() error {
-	fake := flag.Bool("fake", false, "fake an event for testing")
+	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'maruel/sci'")
 	flag.Parse()
 	c, err := loadConfig()
 	if err != nil {
 		return err
 	}
-	env := os.Environ()
-	for i, s := range env {
-		if strings.HasPrefix(s, "GOPATH=") {
-			env[i] = "GOPATH=" + c.GOPATH
-		}
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
 	}
-	if err := os.Mkdir(c.GOPATH, 0700); err != nil && !os.IsExist(err) {
+	gopath := filepath.Join(wd, "sci-gopath")
+	os.Setenv("GOPATH", gopath)
+	if len(*test) != 0 {
+		metadata, out, success := runCheck(c.Check, *test, c.UseSSH, "HEAD", gopath)
+		_, err := fmt.Printf("%s---\n%sSuccess: %t\n", metadata, out, success)
 		return err
 	}
 
-	if *fake {
-		metadata, out, success := runC(env, c.Check, c.Repo, c.UseSSH, "HEAD", c.GOPATH)
-		io.WriteString(os.Stdout, metadata)
-		io.WriteString(os.Stdout, "---\n")
-		io.WriteString(os.Stdout, out)
-		fmt.Printf("Success: %t\n", success)
-		return nil
-	}
-
-	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.AccessToken}))
-	client := github.NewClient(tc)
-	s := server{c: c, client: client, env: env}
+	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
+	s := server{c: c, client: github.NewClient(tc), gopath: gopath}
 	http.Handle("/", &s)
+	log.Printf("Running in %s", wd)
 	log.Printf("Listening on %d", c.Port)
 	return http.ListenAndServe(fmt.Sprintf(":%d", c.Port), nil)
 }
