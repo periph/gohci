@@ -93,14 +93,14 @@ func run(cwd string, cmd ...string) (string, bool) {
 	out, err := c.CombinedOutput()
 	duration := time.Since(start)
 	// Assumes UTF-8.
-	return fmt.Sprintf("$ %s\nin %s\n%s", cmds, duration, string(out)), err == nil
+	return fmt.Sprintf("$ %s  (in %s)%s", cmds, duration, string(out)), err == nil
 }
 
 // runChecks syncs then runs the checks and returns task's results.
 func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath string) (map[string]string, bool) {
 	out := map[string]string{
 		"metadata": fmt.Sprintf(
-			"Commit: %s\nVersion: %s\nGOROOT: %s\nGOPATH: %s\nCPUs: %d\n---\n",
+			"Commit: %s\nVersion: %s\nGOROOT: %s\nGOPATH: %s\nCPUs: %d",
 			commit, runtime.Version(), runtime.GOROOT(), gopath, runtime.NumCPU()),
 		"setup": "",
 	}
@@ -330,6 +330,7 @@ func mainImpl() error {
 	ln.Close()
 	log.Printf("Listening on: %s", a)
 	go http.ListenAndServe(a, nil)
+	// TODO(maruel): watch sci.json too.
 	err = watchFile(thisFile)
 	// Ensures no task is running.
 	s.mu.Lock()

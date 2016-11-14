@@ -13,7 +13,7 @@ The result is the distilled essence of a Continuous Integration service.
 It hardly can get any simpler:
 
 - Only support one specific use case: *Golang project hosted on Github*.
-- As simple as it can be; the initial version is less than 300 lines.
+- As simple as it can be; the initial version was less than 300 lines.
 - There is no server, the worker must be internet accessible and HTTPS must be
   proxied ([Caddy](https://caddyserver.com/) works great along
   https://letsencrypt.org).
