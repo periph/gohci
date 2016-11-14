@@ -38,10 +38,12 @@ This  will create `sci.json` similar to the following:
   "Oauth2AccessToken": "Get one at https://github.com/settings/tokens",
   "UseSSH": false,
   "Name": "sci",
-  "Check": [
-    "go",
-    "test",
-    "./..."
+  "Checks": [
+    [
+      "go",
+      "test",
+      "./..."
+    ]
   ]
 }
 ```

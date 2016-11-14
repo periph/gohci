@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -39,12 +40,12 @@ import (
 )
 
 type config struct {
-	Port              int      // TCP port number for HTTP server.
-	WebHookSecret     string   // https://developer.github.com/webhooks/
-	Oauth2AccessToken string   // https://github.com/settings/tokens, check "repo:status" and "gist"
-	UseSSH            bool     // Use ssh (instead of https) for checkout. Required for private repositories.
-	Name              string   // Display name to use in the status report on Github.
-	Check             []string // Command to run to test the repository. It is run from the repository's root.
+	Port              int        // TCP port number for HTTP server.
+	WebHookSecret     string     // https://developer.github.com/webhooks/
+	Oauth2AccessToken string     // https://github.com/settings/tokens, check "repo:status" and "gist"
+	UseSSH            bool       // Use ssh (instead of https) for checkout. Required for private repositories.
+	Name              string     // Display name to use in the status report on Github.
+	Checks            [][]string // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
 
 func loadConfig() (*config, error) {
@@ -54,7 +55,7 @@ func loadConfig() (*config, error) {
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
 		UseSSH:            false,
 		Name:              "sci",
-		Check:             []string{"go", "test", "./..."},
+		Checks:            [][]string{{"go", "test", "./..."}},
 	}
 	b, err := ioutil.ReadFile("sci.json")
 	if err != nil {
@@ -95,10 +96,14 @@ func run(cwd string, cmd ...string) (string, bool) {
 	return fmt.Sprintf("$ %s\nin %s\n%s", cmds, duration, string(out)), err == nil
 }
 
-// runCheck syncs then runs the check and returns task's metadata and stdout.
-func runCheck(cmd []string, repoName string, useSSH bool, commit, gopath string) (string, string, bool) {
-	metadata := fmt.Sprintf("Commit: %s\nVersion: %s\nGOROOT: %s\nGOPATH: %s\nCPUs: %d\n---\n",
-		commit, runtime.Version(), runtime.GOROOT(), gopath, runtime.NumCPU())
+// runChecks syncs then runs the checks and returns task's results.
+func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath string) (map[string]string, bool) {
+	out := map[string]string{
+		"metadata": fmt.Sprintf(
+			"Commit: %s\nVersion: %s\nGOROOT: %s\nGOPATH: %s\nCPUs: %d\n---\n",
+			commit, runtime.Version(), runtime.GOROOT(), gopath, runtime.NumCPU()),
+		"setup": "",
+	}
 	repoPath := "github.com/" + repoName
 	base := filepath.Join(gopath, "src", repoPath)
 	if _, err := os.Stat(base); err != nil {
@@ -110,37 +115,40 @@ func runCheck(cmd []string, repoName string, useSSH bool, commit, gopath string)
 		if useSSH {
 			url = "git@github.com:" + repoName
 		}
-		out1, ok := run(up, "git", "clone", "--quiet", url)
-		metadata += out1
+		stdout, ok := run(up, "git", "clone", "--quiet", url)
+		out["setup"] = stdout
 		if !ok {
-			return metadata, "", ok
+			return out, ok
 		}
 	} else {
-		out1, ok := run(base, "git", "fetch", "--prune", "--quiet")
-		metadata += out1
+		stdout, ok := run(base, "git", "fetch", "--prune", "--quiet")
+		out["setup"] = stdout
 		if !ok {
-			return metadata, "", ok
+			return out, ok
 		}
 	}
-	out1, ok := run(base, "git", "checkout", "--quiet", commit)
-	metadata += out1
-	if !ok {
-		return metadata, "", ok
+	stdout, ok := run(base, "git", "checkout", "--quiet", commit)
+	out["setup"] += stdout
+	if ok {
+		// TODO(maruel): update dependencies manually!
+		stdout, ok = run(base, "go", "get", "-v", "-d", "-t", "./...")
+		out["setup"] += stdout
+		if ok {
+			// Precompilation has a dramatic effect on a Raspberry Pi.
+			stdout, ok = run(base, "go", "test", "-i", "./...")
+			out["setup"] += stdout
+			if ok {
+				// Finally run the checks!
+				for i, cmd := range cmds {
+					ok2 := true
+					if out[fmt.Sprintf("cmd%d", i+1)], ok2 = run(base, cmd...); !ok2 {
+						ok = false
+					}
+				}
+			}
+		}
 	}
-	// TODO(maruel): update dependencies manually!
-	out1, ok = run(base, "go", "get", "-v", "-d", "-t", "./...")
-	metadata += out1
-	if !ok {
-		return metadata, "", ok
-	}
-	// Precompilation has a dramatic effect on a Raspberry Pi.
-	out1, ok = run(base, "go", "test", "-i", "./...")
-	metadata += out1
-	if !ok {
-		return metadata, "", ok
-	}
-	out, ok := run(base, cmd...)
-	return metadata, out, ok
+	return out, ok
 }
 
 type server struct {
@@ -232,22 +240,19 @@ func (s *server) runCheck(repo, commit string) error {
 	log.Printf("- Running test for %s at %s", repo, commit)
 	// TODO(maruel): Update the gist as the task is running;
 	// https://developer.github.com/v3/gists/#edit-a-gist
-	metadata, out, success := runCheck(s.c.Check, repo, s.c.UseSSH, commit, s.gopath)
-	if metadata == "" {
-		metadata = "<missing>"
-	}
-	if out == "" {
-		out = "<missing>"
-	}
+	out, success := runChecks(s.c.Checks, repo, s.c.UseSSH, commit, s.gopath)
 	// https://developer.github.com/v3/gists/#create-a-gist
+	// It is still accessible via the URL without authentication.
 	gist := &github.Gist{
 		Description: github.String("Output for https://github.com/" + repo + "/commit/" + commit),
-		// It is still accessible via the URL;
-		Public: github.Bool(false),
-		Files: map[github.GistFilename]github.GistFile{
-			"metadata": github.GistFile{Content: &metadata},
-			"stdout":   github.GistFile{Content: &out},
-		},
+		Public:      github.Bool(false),
+		Files:       map[github.GistFilename]github.GistFile{},
+	}
+	for k, v := range out {
+		if len(v) == 0 {
+			v = "<missing>"
+		}
+		gist.Files[github.GistFilename(k)] = github.GistFile{Content: github.String(v)}
 	}
 	var err error
 	if gist, _, err = s.client.Gists.Create(gist); err != nil {
@@ -256,10 +261,17 @@ func (s *server) runCheck(repo, commit string) error {
 	log.Printf("- Gist at %s", *gist.HTMLURL)
 
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
+	desc := "Ran:\n"
+	for i, c := range s.c.Checks {
+		if i != 0 {
+			desc += "\n"
+		}
+		desc += "  " + strings.Join(c, " ")
+	}
 	status := &github.RepoStatus{
 		State:       github.String("success"),
 		TargetURL:   gist.HTMLURL,
-		Description: github.String(fmt.Sprintf("Ran: %s", strings.Join(s.c.Check, " "))),
+		Description: &desc,
 		Context:     github.String("sci"),
 	}
 	if !success {
@@ -289,10 +301,17 @@ func mainImpl() error {
 	if len(*test) != 0 {
 		if *commit == "HEAD" {
 			// Only run locally.
-			metadata, out, success := runCheck(c.Check, *test, c.UseSSH, *commit, gopath)
-			_, err := fmt.Printf("%s---\n%sSuccess: %t\n", metadata, out, success)
+			out, success := runChecks(c.Checks, *test, c.UseSSH, *commit, gopath)
+			names := make([]string, 0, len(out))
+			for k := range out {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			for _, k := range names {
+				fmt.Printf("--- %s\n%s", k, out[k])
+			}
+			_, err := fmt.Printf("\nSuccess: %t\n", success)
 			return err
-
 		}
 		return s.runCheck(*test, *commit)
 	}
