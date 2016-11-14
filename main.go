@@ -128,13 +128,13 @@ func runCheck(cmd []string, repoName string, useSSH bool, commit, gopath string)
 		return metadata, "", ok
 	}
 	// TODO(maruel): update dependencies manually!
-	out1, ok = run(gopath, "go", "get", "-v", "-d", "-t", repoPath+"/...")
+	out1, ok = run(base, "go", "get", "-v", "-d", "-t", "./...")
 	metadata += out1
 	if !ok {
 		return metadata, "", ok
 	}
 	// Precompilation has a dramatic effect on a Raspberry Pi.
-	out1, ok = run(gopath, "go", "test", "-i", repoPath+"/...")
+	out1, ok = run(base, "go", "test", "-i", "./...")
 	metadata += out1
 	if !ok {
 		return metadata, "", ok
