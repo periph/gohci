@@ -197,7 +197,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("- %v")
 		}
 	case *github.PushEvent:
-		log.Printf("- Push #%d %s", *event.PushID, *event.Ref)
+		log.Printf("- Push %s %s", *event.Ref, *event.HeadCommit.ID)
 		if !isInList(*event.Ref, s.c.Branches) {
 			log.Printf("- ignoring branch %q for push", *event.Ref)
 			io.WriteString(w, "{}")
