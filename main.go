@@ -133,6 +133,12 @@ func runCheck(cmd []string, repoName string, useSSH bool, commit, gopath string)
 	if !ok {
 		return metadata, "", ok
 	}
+	// Precompilation has a dramatic effect on a Raspberry Pi.
+	out1, ok = run(gopath, "go", "test", "-i", repoPath+"/...")
+	metadata += out1
+	if !ok {
+		return metadata, "", ok
+	}
 	out, ok := run(base, cmd...)
 	return metadata, out, ok
 }
