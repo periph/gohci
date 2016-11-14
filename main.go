@@ -259,6 +259,7 @@ func (s *server) runCheck(repo, commit string) error {
 
 func mainImpl() error {
 	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'maruel/sci'")
+	commit := flag.String("commit", "HEAD", "commit ID to test and update; will only update if not 'HEAD'")
 	flag.Parse()
 	c, err := loadConfig()
 	if err != nil {
@@ -270,14 +271,18 @@ func mainImpl() error {
 	}
 	gopath := filepath.Join(wd, "sci-gopath")
 	os.Setenv("GOPATH", gopath)
-	if len(*test) != 0 {
-		metadata, out, success := runCheck(c.Check, *test, c.UseSSH, "HEAD", gopath)
-		_, err := fmt.Printf("%s---\n%sSuccess: %t\n", metadata, out, success)
-		return err
-	}
-
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
 	s := server{c: c, client: github.NewClient(tc), gopath: gopath, collabs: map[string]map[string]bool{}}
+	if len(*test) != 0 {
+		if *commit == "HEAD" {
+			// Only run locally.
+			metadata, out, success := runCheck(c.Check, *test, c.UseSSH, *commit, gopath)
+			_, err := fmt.Printf("%s---\n%sSuccess: %t\n", metadata, out, success)
+			return err
+
+		}
+		return s.runCheck(*test, *commit)
+	}
 	http.Handle("/", &s)
 	log.Printf("Running in %s", wd)
 	log.Printf("Listening on %d", c.Port)
