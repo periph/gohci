@@ -197,21 +197,24 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch event := event.(type) {
+	// TODO(maruel): For *github.CommitCommentEvent and
+	// *github.IssueCommentEvent, when the comment is 'run tests' from a
+	// collaborator, run the tests.
 	case *github.PullRequestEvent:
 		log.Printf("- PR #%d %s %s", *event.PullRequest.ID, *event.Sender.Login, *event.Action)
 		if *event.Action != "opened" && *event.Action != "synchronized" {
 			log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
 		} else if !s.canCollab(*event.Repo.Owner.Login, *event.Repo.Name, *event.Sender.Login) {
 			log.Printf("- ignoring owner %q for PR", *event.Sender.Login)
-		} else if err := s.runCheck(*event.Repo.FullName, *event.PullRequest.Head.SHA); err != nil {
-			log.Printf("- %v")
+		} else if err = s.runCheck(*event.Repo.FullName, *event.PullRequest.Head.SHA); err != nil {
+			log.Printf("- %v", err)
 		}
 	case *github.PushEvent:
 		log.Printf("- Push %s %s", *event.Ref, *event.HeadCommit.ID)
 		if !strings.HasPrefix(*event.Ref, "refs/heads/") {
 			log.Printf("- ignoring branch %q for push", *event.Ref)
-		} else if err := s.runCheck(*event.Repo.FullName, *event.HeadCommit.ID); err != nil {
-			log.Printf("- %v")
+		} else if err = s.runCheck(*event.Repo.FullName, *event.HeadCommit.ID); err != nil {
+			log.Printf("- %v", err)
 		}
 	default:
 		log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
