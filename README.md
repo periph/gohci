@@ -5,7 +5,7 @@
 All I wanted was to run `go test` on a Raspberry Pi on both Pull Requests and
 Push on `master`.
 
-The result is the bare bone essence of a Continuous Integration service.
+The result is the distilled essence of a Continuous Integration service.
 
 
 ## Design
