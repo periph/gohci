@@ -193,7 +193,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// *github.IssueCommentEvent, when the comment is 'run tests' from a
 		// collaborator, run the tests.
 		case *github.PullRequestEvent:
-			log.Printf("- PR #%d %s %s", *event.PullRequest.ID, *event.Sender.Login, *event.Action)
+			log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.ID, *event.Sender.Login, *event.Action)
 			if *event.Action != "opened" && *event.Action != "synchronized" {
 				log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
 			} else if !s.canCollab(*event.Repo.Owner.Login, *event.Repo.Name, *event.Sender.Login) {
@@ -203,9 +203,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		case *github.PushEvent:
 			if event.HeadCommit == nil {
-				log.Printf("- Push %s <deleted>", *event.Ref)
+				log.Printf("- Push %s %s <deleted>", *event.Repo.FullName, *event.Ref)
 			} else {
-				log.Printf("- Push %s %s", *event.Ref, *event.HeadCommit.ID)
+				log.Printf("- Push %s %s %s", *event.Repo.FullName, *event.Ref, *event.HeadCommit.ID)
 				if !strings.HasPrefix(*event.Ref, "refs/heads/") {
 					log.Printf("- ignoring branch %q for push", *event.Ref)
 				} else if err = s.runCheck(*event.Repo.FullName, *event.HeadCommit.ID); err != nil {
