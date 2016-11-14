@@ -2,14 +2,14 @@
 # Use of this source code is governed under the Apache License, Version 2.0
 # that can be found in the LICENSE file.
 
-# Copy to /etc/systemd/system/sci.service
-# Then run:
+# To install, run as root:
+#   cp sci.service /etc/systemd/system
 #   systemctl daemon-reload
 #   systemctl enable sci.service
 #   systemctl start sci.service
 #
 # To view logs:
-#   journalctl -u sci.service
+#   journalctl -f -u sci.service
 
 # All the flags in the following help pages apply:
 # - https://www.freedesktop.org/software/systemd/man/systemd.exec.html
