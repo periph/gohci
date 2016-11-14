@@ -85,6 +85,16 @@ Environment=PATH=/home/pi/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/b
 ```
 
 
+## Updating
+
+Note that this will break currently running tests.
+
+```
+go get -u github.com/maruel/sci
+sudo systemctl restart sci
+```
+
+
 ## Testing
 
 To test your hook, run:
