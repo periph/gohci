@@ -79,6 +79,7 @@ func loadConfig() (*config, error) {
 	}
 	// Update the file in canonical format.
 	if !bytes.Equal(b, d) {
+		log.Printf("Updating sci.json in canonical format")
 		if err := ioutil.WriteFile("sci.json", b, 0600); err != nil {
 			return nil, err
 		}
@@ -142,8 +143,8 @@ func runCheck(cmd []string, repoName string, useSSH bool, commit, gopath string)
 	if !ok {
 		return metadata, "", ok
 	}
-	// TODO(maruel): update dependencies manually.
-	out1, ok = run(gopath, "go", "get", "-v", "-d", repoPath)
+	// TODO(maruel): update dependencies manually!
+	out1, ok = run(gopath, "go", "get", "-v", "-d", "-t", repoPath)
 	metadata += out1
 	if !ok {
 		return metadata, "", ok
