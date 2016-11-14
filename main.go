@@ -90,6 +90,9 @@ func run(cwd string, cmd ...string) (string, bool) {
 	c.Dir = cwd
 	start := time.Now()
 	out, err := c.CombinedOutput()
+	if len(out) == 0 && err != nil {
+		out = []byte(err.Error())
+	}
 	duration := time.Since(start)
 	// Assumes UTF-8.
 	return fmt.Sprintf("$ %s  (%s)\n%s", cmds, duration, string(out)), err == nil
@@ -316,6 +319,7 @@ func mainImpl() error {
 	}
 	gopath := filepath.Join(wd, "sci-gopath")
 	os.Setenv("GOPATH", gopath)
+	os.Setenv("PATH", filepath.Join(gopath, "bin")+":"+os.Getenv("PATH"))
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
 	s := server{c: c, client: github.NewClient(tc), gopath: gopath, collabs: map[string]map[string]bool{}}
 	if len(*test) != 0 {
