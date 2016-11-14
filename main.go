@@ -211,7 +211,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *server) runCheck(repo, commit string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	log.Printf("- Running test")
+	log.Printf("- Running test for %s at %s", repo, commit)
 	metadata, out, success := runC(s.env, s.c.Check, repo, s.c.UseSSH, commit, s.c.GOPATH)
 
 	// https://developer.github.com/v3/gists/#create-a-gist
