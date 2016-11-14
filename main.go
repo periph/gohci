@@ -80,7 +80,7 @@ func loadConfig() (*config, error) {
 	// Update the file in canonical format.
 	if !bytes.Equal(b, d) {
 		log.Printf("Updating sci.json in canonical format")
-		if err := ioutil.WriteFile("sci.json", b, 0600); err != nil {
+		if err := ioutil.WriteFile("sci.json", d, 0600); err != nil {
 			return nil, err
 		}
 	}
