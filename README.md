@@ -77,6 +77,13 @@ systemctl enable sci.service
 systemctl start sci.service
 ```
 
+If you use your own Go version instead of the debian package, you need to add
+this in the `[Service]` section of `sci.service`:
+
+```
+Environment=PATH=/home/pi/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin GOROOT=/home/pi/go
+```
+
 
 ## Testing
 
