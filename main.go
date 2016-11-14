@@ -52,7 +52,7 @@ func loadConfig() (*config, error) {
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
 		UseSSH:            false,
 		Name:              "sci",
-		Check:             []string{"go", "test"},
+		Check:             []string{"go", "test", "./..."},
 	}
 	b, err := ioutil.ReadFile("sci.json")
 	if err != nil {

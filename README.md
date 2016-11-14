@@ -2,8 +2,8 @@
 
 ## Genesis
 
-All I wanted was to run `go test` on a Raspberry Pi on both Pull Requests and
-Push on `master`.
+All I wanted was to run `go test ./...` on a Raspberry Pi on both Pull Requests
+and Pushes.
 
 The result is the distilled essence of a Continuous Integration service.
 
@@ -19,7 +19,7 @@ It hardly can get any simpler:
   https://letsencrypt.org).
 - Metadata and stdout is saved as a gist on Github.
 - The worker has a configuration file that determines what command it runs to
-  test the project. By default it is `go test`.
+  test the project. By default it is `go test ./...`.
 
 
 ## Configuration
@@ -40,7 +40,8 @@ This  will create `sci.json` similar to the following:
   "Name": "sci",
   "Check": [
     "go",
-    "test"
+    "test",
+    "./..."
   ]
 }
 ```
