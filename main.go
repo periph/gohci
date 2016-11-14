@@ -29,7 +29,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -96,16 +95,21 @@ func run(cwd string, cmd ...string) (string, bool) {
 	return fmt.Sprintf("$ %s  (%s)\n%s", cmds, duration, string(out)), err == nil
 }
 
+type file struct {
+	name, content string
+}
+
+func metadata(commit, gopath string) string {
+	return fmt.Sprintf(
+		"Commit: %s\nVersion: %s\nGOROOT: %s\nGOPATH: %s\nCPUs: %d",
+		commit, runtime.Version(), runtime.GOROOT(), gopath, runtime.NumCPU())
+}
+
 // runChecks syncs then runs the checks and returns task's results.
-func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath string) (map[string]string, bool) {
-	out := map[string]string{
-		"metadata": fmt.Sprintf(
-			"Commit: %s\nVersion: %s\nGOROOT: %s\nGOPATH: %s\nCPUs: %d",
-			commit, runtime.Version(), runtime.GOROOT(), gopath, runtime.NumCPU()),
-		"setup": "",
-	}
+func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath string, results chan<- file) bool {
 	repoPath := "github.com/" + repoName
 	base := filepath.Join(gopath, "src", repoPath)
+	setup := ""
 	if _, err := os.Stat(base); err != nil {
 		up := path.Dir(base)
 		if err := os.MkdirAll(up, 0700); err != nil && !os.IsExist(err) {
@@ -116,39 +120,43 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 			url = "git@github.com:" + repoName
 		}
 		stdout, ok := run(up, "git", "clone", "--quiet", url)
-		out["setup"] = stdout
+		setup = stdout
 		if !ok {
-			return out, ok
+			results <- file{"setup", setup}
+			return ok
 		}
 	} else {
 		stdout, ok := run(base, "git", "fetch", "--prune", "--quiet")
-		out["setup"] = stdout
+		setup = stdout
 		if !ok {
-			return out, ok
+			results <- file{"setup", setup}
+			return ok
 		}
 	}
 	stdout, ok := run(base, "git", "checkout", "--quiet", commit)
-	out["setup"] += stdout
+	setup += stdout
 	if ok {
 		// TODO(maruel): update dependencies manually!
 		stdout, ok = run(base, "go", "get", "-v", "-d", "-t", "./...")
-		out["setup"] += stdout
+		setup += stdout
 		if ok {
 			// Precompilation has a dramatic effect on a Raspberry Pi.
 			stdout, ok = run(base, "go", "test", "-i", "./...")
-			out["setup"] += stdout
-			if ok {
-				// Finally run the checks!
-				for i, cmd := range cmds {
-					ok2 := true
-					if out[fmt.Sprintf("cmd%d", i+1)], ok2 = run(base, cmd...); !ok2 {
-						ok = false
-					}
-				}
+			setup += stdout
+		}
+	}
+	results <- file{"setup", setup}
+	if ok {
+		// Finally run the checks!
+		for i, cmd := range cmds {
+			stdout, ok2 := run(base, cmd...)
+			results <- file{fmt.Sprintf("cmd%d", i+1), stdout}
+			if !ok2 {
+				ok = false
 			}
 		}
 	}
-	return out, ok
+	return ok
 }
 
 type server struct {
@@ -238,27 +246,39 @@ func (s *server) runCheck(repo, commit string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	log.Printf("- Running test for %s at %s", repo, commit)
-	// TODO(maruel): Update the gist as the task is running;
-	// https://developer.github.com/v3/gists/#edit-a-gist
-	out, success := runChecks(s.c.Checks, repo, s.c.UseSSH, commit, s.gopath)
 	// https://developer.github.com/v3/gists/#create-a-gist
 	// It is still accessible via the URL without authentication.
 	gist := &github.Gist{
 		Description: github.String("Output for https://github.com/" + repo + "/commit/" + commit),
 		Public:      github.Bool(false),
-		Files:       map[github.GistFilename]github.GistFile{},
+		Files:       map[github.GistFilename]github.GistFile{"metadata": github.GistFile{Content: github.String(metadata(commit, s.gopath))}},
 	}
-	for k, v := range out {
-		if len(v) == 0 {
-			v = "<missing>"
-		}
-		gist.Files[github.GistFilename(k)] = github.GistFile{Content: github.String(v)}
-	}
-	var err error
-	if gist, _, err = s.client.Gists.Create(gist); err != nil {
+	gist, _, err := s.client.Gists.Create(gist)
+	if err != nil {
+		// Don't bother running the tests.
 		return err
 	}
 	log.Printf("- Gist at %s", *gist.HTMLURL)
+	results := make(chan file)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := range results {
+			// https://developer.github.com/v3/gists/#edit-a-gist
+			if len(i.content) == 0 {
+				i.content = "<missing>"
+			}
+			gist.Files = map[github.GistFilename]github.GistFile{github.GistFilename(i.name): github.GistFile{Content: &i.content}}
+			if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
+				// Just move on.
+				log.Printf("- failed to update gist %v", err)
+			}
+		}
+	}()
+	success := runChecks(s.c.Checks, repo, s.c.UseSSH, commit, s.gopath, results)
+	close(results)
+	wg.Wait()
 
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	desc := "Ran:\n"
@@ -301,15 +321,19 @@ func mainImpl() error {
 	if len(*test) != 0 {
 		if *commit == "HEAD" {
 			// Only run locally.
-			out, success := runChecks(c.Checks, *test, c.UseSSH, *commit, gopath)
-			names := make([]string, 0, len(out))
-			for k := range out {
-				names = append(names, k)
-			}
-			sort.Strings(names)
-			for _, k := range names {
-				fmt.Printf("--- %s\n%s", k, out[k])
-			}
+			results := make(chan file)
+			var wg sync.WaitGroup
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := range results {
+					fmt.Printf("--- %s\n%s", i.name, i.content)
+				}
+			}()
+			fmt.Printf("--- metadata\n%s", metadata(*commit, gopath))
+			success := runChecks(c.Checks, *test, c.UseSSH, *commit, gopath, results)
+			close(results)
+			wg.Wait()
 			_, err := fmt.Printf("\nSuccess: %t\n", success)
 			return err
 		}
