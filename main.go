@@ -129,7 +129,7 @@ func runCheck(cmd []string, repoName string, useSSH bool, commit, gopath string)
 		return metadata, "", ok
 	}
 	// TODO(maruel): update dependencies manually!
-	out1, ok = run(gopath, "go", "get", "-v", "-d", "-t", repoPath)
+	out1, ok = run(gopath, "go", "get", "-v", "-d", "-t", repoPath+"/...")
 	metadata += out1
 	if !ok {
 		return metadata, "", ok
