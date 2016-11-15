@@ -131,7 +131,7 @@ type file struct {
 func metadata(commit, gopath string) string {
 	return fmt.Sprintf(
 		"Commit:  %s\nCPUs:    %d\nVersion: %s\nGOROOT:  %s\nGOPATH:  %s\nPATH:    %s",
-		commit, runtime.Version(), runtime.GOROOT(), gopath, runtime.NumCPU(), os.Getenv("PATH"))
+		commit, runtime.NumCPU(), runtime.Version(), runtime.GOROOT(), gopath, os.Getenv("PATH"))
 }
 
 // runChecks syncs then runs the checks and returns task's results.
