@@ -278,7 +278,7 @@ func (s *server) runCheck(repo, commit string) error {
 	// https://developer.github.com/v3/gists/#create-a-gist
 	// It is still accessible via the URL without authentication.
 	gist := &github.Gist{
-		Description: github.String("Output for https://github.com/" + repo + "/commit/" + commit),
+		Description: github.String(s.c.Name + " for https://github.com/" + repo + "/commit/" + commit),
 		Public:      github.Bool(false),
 		Files:       map[github.GistFilename]github.GistFile{"metadata": github.GistFile{Content: github.String(metadata(commit, s.gopath))}},
 	}
