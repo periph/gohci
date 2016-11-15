@@ -246,6 +246,17 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "{}")
 }
 
+func str(cmds [][]string) string {
+	s := ""
+	for i, cmd := range cmds {
+		if i != 0 {
+			s += "\n"
+		}
+		s += "  " + strings.Join(cmd, " ")
+	}
+	return s
+}
+
 func (s *server) runCheck(repo, commit string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -263,6 +274,20 @@ func (s *server) runCheck(repo, commit string) error {
 		return err
 	}
 	log.Printf("- Gist at %s", *gist.HTMLURL)
+
+	cmds := str(s.c.Checks)
+	// https://developer.github.com/v3/repos/statuses/#create-a-status
+	status := &github.RepoStatus{
+		State:       github.String("failure"),
+		TargetURL:   gist.HTMLURL,
+		Description: github.String("Running:\n" + cmds),
+		Context:     &s.c.Name,
+	}
+	parts := strings.SplitN(repo, "/", 2)
+	if status, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status); err != nil {
+		return err
+	}
+
 	results := make(chan file)
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -287,24 +312,10 @@ func (s *server) runCheck(repo, commit string) error {
 	close(results)
 	wg.Wait()
 
-	// https://developer.github.com/v3/repos/statuses/#create-a-status
-	desc := "Ran:\n"
-	for i, c := range s.c.Checks {
-		if i != 0 {
-			desc += "\n"
-		}
-		desc += "  " + strings.Join(c, " ")
+	if success {
+		status.State = github.String("success")
 	}
-	status := &github.RepoStatus{
-		State:       github.String("success"),
-		TargetURL:   gist.HTMLURL,
-		Description: &desc,
-		Context:     github.String("sci"),
-	}
-	if !success {
-		status.State = github.String("failure")
-	}
-	parts := strings.SplitN(repo, "/", 2)
+	status.Description = github.String("Ran:\n" + cmds)
 	_, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status)
 	return err
 }
