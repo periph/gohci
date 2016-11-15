@@ -52,6 +52,9 @@ Edit it based on your needs. Run again and it will start a web server. When
 `sci` is running, updating `sci.json` will make the process quit. It is assumed
 that you use a service manager, like systemd.
 
+To test a private repository, set `UseSSH` to true and use a read-only
+deployment key so your worker has access to the repository.
+
 
 ### OAuth2 token
 

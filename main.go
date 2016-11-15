@@ -31,7 +31,9 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bugsnag/osext"
 	"github.com/google/go-github/github"
@@ -83,6 +85,21 @@ func loadConfig() (*config, error) {
 	return c, nil
 }
 
+func normalizeUTF8(b []byte) []byte {
+	if utf8.Valid(b) {
+		return b
+	}
+	var out []byte
+	for {
+		r, size := utf8.DecodeRune(b)
+		if r != utf8.RuneError {
+			out = append(out, b[:size]...)
+		}
+		b = b[size:]
+	}
+	return out
+}
+
 func run(cwd string, cmd ...string) (string, bool) {
 	cmds := strings.Join(cmd, " ")
 	log.Printf("- cwd=%s : %s", cwd, cmds)
@@ -90,12 +107,20 @@ func run(cwd string, cmd ...string) (string, bool) {
 	c.Dir = cwd
 	start := time.Now()
 	out, err := c.CombinedOutput()
+	duration := time.Since(start)
 	if len(out) == 0 && err != nil {
 		out = []byte(err.Error())
 	}
-	duration := time.Since(start)
-	// Assumes UTF-8.
-	return fmt.Sprintf("$ %s  (%s)\n%s", cmds, duration, string(out)), err == nil
+	exit := 0
+	if err != nil {
+		exit = -1
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+				exit = status.ExitStatus()
+			}
+		}
+	}
+	return fmt.Sprintf("$ %s  (exit:%d in %s)\n%s", cmds, exit, duration, string(normalizeUTF8(out))), err == nil
 }
 
 type file struct {
@@ -246,17 +271,6 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "{}")
 }
 
-func str(cmds [][]string) string {
-	s := ""
-	for i, cmd := range cmds {
-		if i != 0 {
-			s += "\n"
-		}
-		s += "  " + strings.Join(cmd, " ")
-	}
-	return s
-}
-
 func (s *server) runCheck(repo, commit string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -275,7 +289,13 @@ func (s *server) runCheck(repo, commit string) error {
 	}
 	log.Printf("- Gist at %s", *gist.HTMLURL)
 
-	cmds := str(s.c.Checks)
+	cmds := ""
+	for i, cmd := range s.c.Checks {
+		if i != 0 {
+			cmds += "\n"
+		}
+		cmds += "  " + strings.Join(cmd, " ")
+	}
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
 		State:       github.String("failure"),
