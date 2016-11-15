@@ -76,9 +76,10 @@ Setting up as systemd means it'll run automatically. The following is
 preconfigured for a `pi` user. Edit as necessary.
 
 ```
-cp sci.service /etc/systemd/system/sci.service
+cp systemd/* /etc/systemd/system
 systemctl daemon-reload
 systemctl enable sci.service
+systemctl enable sci_update.timer
 systemctl start sci.service
 ```
 

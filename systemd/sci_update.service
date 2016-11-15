@@ -1,0 +1,24 @@
+# Copyright 2016 Marc-Antoine Ruel. All rights reserved.
+# Use of this source code is governed under the Apache License, Version 2.0
+# that can be found in the LICENSE file.
+
+# To install, run as root:
+#   cp sci_update.service /etc/systemd/system
+#
+# To view logs:
+#   journalctl -f -u sci_update.service
+
+# All the flags in the following help pages apply:
+# - https://www.freedesktop.org/software/systemd/man/systemd.exec.html
+# - https://www.freedesktop.org/software/systemd/man/systemd.service.html
+# - https://www.freedesktop.org/software/systemd/man/systemd.unit.html
+
+[Unit]
+Description=Updates sci, as triggered by sci_update.timer
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+Group=pi
+ExecStart=/bin/sh -l -c "go get -v -u github.com/maruel/sci"

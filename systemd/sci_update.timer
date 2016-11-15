@@ -1,0 +1,23 @@
+# Copyright 2016 Marc-Antoine Ruel. All rights reserved.
+# Use of this source code is governed under the Apache License, Version 2.0
+# that can be found in the LICENSE file.
+
+# To install, run as root:
+#   cp sci_update.service /etc/systemd/system
+#   systemctl daemon-reload
+#   systemctl enable sci_update.timer
+
+# All the flags in the following help pages apply:
+# - https://www.freedesktop.org/software/systemd/man/systemd.timer.html
+# - https://www.freedesktop.org/software/systemd/man/systemd.unit.html
+
+[Unit]
+Description=go get -u sci as a cron job
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=10min
+RandomizedDelaySec=5
+
+[Install]
+WantedBy=timers.target
