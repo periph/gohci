@@ -48,7 +48,9 @@ This  will create `sci.json` similar to the following:
 }
 ```
 
-Edit it based on your needs. Run again and it will start a web server.
+Edit it based on your needs. Run again and it will start a web server. When
+`sci` is running, updating `sci.json` will make the process quit. It is assumed
+that you use a service manager, like systemd.
 
 
 ### OAuth2 token
@@ -86,7 +88,6 @@ this in the `[Service]` section of `sci.service`:
 ```
 Environment=PATH=/home/pi/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin GOROOT=/home/pi/go
 ```
-
 
 ## Updating
 

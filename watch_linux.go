@@ -6,30 +6,34 @@ package main
 
 import (
 	"os"
+	"time"
 
 	fsnotify "gopkg.in/fsnotify.v1"
 )
 
-func watchFile(fileName string) error {
-	fi, err := os.Stat(fileName)
+func watchFiles(paths ...string) error {
+	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
 	}
-	mod0 := fi.ModTime()
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return err
-	}
-	defer watcher.Close()
-	if err = watcher.Add(fileName); err != nil {
-		return err
+	defer w.Close()
+	m := map[string]time.Time{}
+	for _, p := range paths {
+		fi, err := os.Stat(p)
+		if err != nil {
+			return err
+		}
+		m[p] = fi.ModTime()
+		if err = w.Add(p); err != nil {
+			return err
+		}
 	}
 	for {
 		select {
-		case err = <-watcher.Errors:
+		case err = <-w.Errors:
 			return err
-		case <-watcher.Events:
-			if fi, err = os.Stat(fileName); err != nil || !fi.ModTime().Equal(mod0) {
+		case n := <-w.Events:
+			if fi, err := os.Stat(n.Name); err != nil || !fi.ModTime().Equal(m[n.Name]) {
 				return err
 			}
 		}

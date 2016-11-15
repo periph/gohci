@@ -365,8 +365,7 @@ func mainImpl() error {
 	ln.Close()
 	log.Printf("Listening on: %s", a)
 	go http.ListenAndServe(a, nil)
-	// TODO(maruel): watch sci.json too.
-	err = watchFile(thisFile)
+	err = watchFiles(thisFile, "sci.json")
 	// Ensures no task is running.
 	s.mu.Lock()
 	return err

@@ -6,7 +6,7 @@
 
 package main
 
-func watchFile(fileName string) error {
+func watchFiles(paths ...string) error {
 	select {}
 	return nil
 }
