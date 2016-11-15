@@ -275,10 +275,17 @@ func (s *server) runCheck(repo, commit string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	log.Printf("- Running test for %s at %s", repo, commit)
+	cmds := ""
+	for i, cmd := range s.c.Checks {
+		if i != 0 {
+			cmds += "\n"
+		}
+		cmds += "  " + strings.Join(cmd, " ")
+	}
 	// https://developer.github.com/v3/gists/#create-a-gist
 	// It is still accessible via the URL without authentication.
 	gist := &github.Gist{
-		Description: github.String(s.c.Name + " for https://github.com/" + repo + "/commit/" + commit),
+		Description: github.String(s.c.Name + " for https://github.com/" + repo + "/commit/" + commit + "\nCommands:\n" + cmds),
 		Public:      github.Bool(false),
 		Files:       map[github.GistFilename]github.GistFile{"metadata": github.GistFile{Content: github.String(metadata(commit, s.gopath))}},
 	}
@@ -289,18 +296,11 @@ func (s *server) runCheck(repo, commit string) error {
 	}
 	log.Printf("- Gist at %s", *gist.HTMLURL)
 
-	cmds := ""
-	for i, cmd := range s.c.Checks {
-		if i != 0 {
-			cmds += "\n"
-		}
-		cmds += "  " + strings.Join(cmd, " ")
-	}
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
 		State:       github.String("failure"),
 		TargetURL:   gist.HTMLURL,
-		Description: github.String("Running:\n" + cmds),
+		Description: github.String("Running tests"),
 		Context:     &s.c.Name,
 	}
 	parts := strings.SplitN(repo, "/", 2)
@@ -335,7 +335,7 @@ func (s *server) runCheck(repo, commit string) error {
 	if success {
 		status.State = github.String("success")
 	}
-	status.Description = github.String("Ran:\n" + cmds)
+	status.Description = github.String("Ran tests")
 	_, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status)
 	return err
 }
