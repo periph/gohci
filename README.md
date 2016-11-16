@@ -16,8 +16,8 @@ It hardly can get any simpler:
 - Only support one specific use case: *Golang project hosted on Github*.
 - There is no server, the worker must be internet accessible and HTTPS must be
   proxied down to HTTP.
-  - [Caddy](https://caddyserver.com/) works great along
-    [letsencrypt.org](https://letsencrypt.org).
+  - [Caddy](https://caddyserver.com/) works great along it's native
+    [letsencrypt.org](https://letsencrypt.org) support.
 - Each check's stdout is "_streamed_" to the gist as they complete.
 - The worker has a configuration file that determines what command it runs to
   test the project.
@@ -42,7 +42,7 @@ It will look like this:
   "WebHookSecret": "Create a secret and set it at github.com/'name'/'repo'/settings/hooks",
   "Oauth2AccessToken": "Get one at https://github.com/settings/tokens",
   "UseSSH": false,
-  "Name": "sci",
+  "Name": "<the hostname by default>",
   "Checks": [
     [
       "go",
@@ -75,7 +75,7 @@ Visit to `github.com/<name>/<repo>/settings/hooks` and create a new webhook.
 - Use your worker IP address or hostname as the hook URL,
   `https://1.2.3.4/github/repoA`.
 - Type a random string, that you will put in `WebHookSecret` in `sci.json`.
-- Click `Let me select individual events` and check: ``Commit comment`, `Pull
+- Click `Let me select individual events` and check: `Commit comment`, `Pull
   request`, `Pull request review comment` and `Push`.
 
 
@@ -83,7 +83,7 @@ Visit to `github.com/<name>/<repo>/settings/hooks` and create a new webhook.
 
 Setting up as systemd means it'll run automatically. The following is
 preconfigured for a `pi` user. Edit as necessary, which is necessary if you run
-your own Go version.
+your own Go version instead of the debian package.
 
 As root:
 
@@ -136,9 +136,9 @@ be 0wned. That's it. Use a strong webhook secret.
 
 ### Run `sci` for multiple repositories on my device?
 
-- Copy paste sci.service multiple times. Don't duplicate `sci_update.service`
+- Copy paste `sci.service` multiple times. Don't duplicate `sci_update.service`
   and `sci_update.timer`, just `sci.service`!
-- Make each one use a different `WorkingDirectory=` value.
+- Make each one use a *different* `WorkingDirectory=` value.
 - In each directory, create a `sci.json` and use a different `Port`.
 - Register and start the services via systemd via `systemctl` commands [listed
   above](#systemd).
@@ -174,7 +174,7 @@ I think you are missing the point. That said, forking this code and updating
   [C.H.I.P.](https://getchip.com/), a [Raspberry
   Pi](https://www.raspberrypi.org/), a [Pine64](https://www.pine64.org/), etc.
 - Register multiple webhooks to your repository, one per device, using the
-  [explanations](#webhooks) above. For each hook, use URLs in the format
+  [explanations](#webhook) above. For each hook, use URLs in the format
   `https://1.2.3.4/github/repoA/deviceX`.
 - Setup your `Caddyfile` like this:
 
@@ -185,15 +185,16 @@ ci.example.com {
     tls youremail@example.com
     proxy /github/repoA/chip chip:8080
     proxy /github/repoA/pine64 pine64:8080
-    proxy /github/repoA/rpi3 raspberry:8080
+    proxy /github/repoA/rpi3 raspberrypi:8080
 }
 ```
 
 
 ### Won't the auto-updater break my CI when you push broken code?
 
-Yes. I'll try to keep `sci` always good but it can fail from time to time. So
-fork the `sci` repository and run from your copy.
+Yes. I'll try to keep `sci` always in a working condition but it can fail from
+time to time. So feel free to fork the `sci` repository and run from your copy.
+It'll work just fine.
 
 
 ### `sci` doesn't have unit tests. Isn't that stupid?

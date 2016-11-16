@@ -50,12 +50,16 @@ type config struct {
 }
 
 func loadConfig() (*config, error) {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "sci"
+	}
 	c := &config{
 		Port:              8080,
 		WebHookSecret:     "Create a secret and set it at github.com/'name'/'repo'/settings/hooks",
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
 		UseSSH:            false,
-		Name:              "sci",
+		Name:              hostname,
 		Checks:            [][]string{{"go", "test", "./..."}},
 	}
 	b, err := ioutil.ReadFile("sci.json")
