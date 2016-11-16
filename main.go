@@ -44,7 +44,6 @@ type config struct {
 	Port              int        // TCP port number for HTTP server.
 	WebHookSecret     string     // https://developer.github.com/webhooks/
 	Oauth2AccessToken string     // https://github.com/settings/tokens, check "repo:status" and "gist"
-	UseSSH            bool       // Use ssh (instead of https) for checkout. Required for private repositories.
 	Name              string     // Display name to use in the status report on Github.
 	Checks            [][]string // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
@@ -56,9 +55,8 @@ func loadConfig() (*config, error) {
 	}
 	c := &config{
 		Port:              8080,
-		WebHookSecret:     "Create a secret and set it at github.com/'name'/'repo'/settings/hooks",
+		WebHookSecret:     "Create a secret and set it at github.com/user/repo/settings/hooks",
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
-		UseSSH:            false,
 		Name:              hostname,
 		Checks:            [][]string{{"go", "test", "./..."}},
 	}
@@ -253,7 +251,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
 				} else if !s.canCollab(*event.Repo.Owner.Login, *event.Repo.Name, *event.Sender.Login) {
 					log.Printf("- ignoring owner %q for PR", *event.Sender.Login)
-				} else if err = s.runCheck(*event.Repo.FullName, *event.PullRequest.Head.SHA); err != nil {
+				} else if err = s.runCheck(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private); err != nil {
 					log.Printf("- %v", err)
 				}
 			case *github.PushEvent:
@@ -263,7 +261,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					log.Printf("- Push %s %s %s", *event.Repo.FullName, *event.Ref, *event.HeadCommit.ID)
 					if !strings.HasPrefix(*event.Ref, "refs/heads/") {
 						log.Printf("- ignoring branch %q for push", *event.Ref)
-					} else if err = s.runCheck(*event.Repo.FullName, *event.HeadCommit.ID); err != nil {
+					} else if err = s.runCheck(*event.Repo.FullName, *event.HeadCommit.ID, *event.Repo.Private); err != nil {
 						log.Printf("- %v", err)
 					}
 				}
@@ -275,7 +273,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "{}")
 }
 
-func (s *server) runCheck(repo, commit string) error {
+func (s *server) runCheck(repo, commit string, useSSH bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	log.Printf("- Running test for %s at %s", repo, commit)
@@ -338,7 +336,7 @@ func (s *server) runCheck(repo, commit string) error {
 			i++
 		}
 	}()
-	success := runChecks(s.c.Checks, repo, s.c.UseSSH, commit, s.gopath, results)
+	success := runChecks(s.c.Checks, repo, useSSH, commit, s.gopath, results)
 	close(results)
 	wg.Wait()
 
@@ -353,6 +351,7 @@ func (s *server) runCheck(repo, commit string) error {
 func mainImpl() error {
 	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'maruel/sci'")
 	commit := flag.String("commit", "HEAD", "commit ID to test and update; will only update if not 'HEAD'")
+	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS")
 	flag.Parse()
 	c, err := loadConfig()
 	if err != nil {
@@ -383,7 +382,7 @@ func mainImpl() error {
 				}
 			}()
 			fmt.Printf("--- metadata\n%s", metadata(*commit, gopath))
-			success := runChecks(c.Checks, *test, c.UseSSH, *commit, gopath, results)
+			success := runChecks(c.Checks, *test, *useSSH, *commit, gopath, results)
 			close(results)
 			wg.Wait()
 			_, err := fmt.Printf("\nSuccess: %t\n", success)

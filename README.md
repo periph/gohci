@@ -39,9 +39,8 @@ It will look like this:
 ```
 {
   "Port": 8080,
-  "WebHookSecret": "Create a secret and set it at github.com/'name'/'repo'/settings/hooks",
+  "WebHookSecret": "Create a secret and set it at github.com/user/repo/settings/hooks",
   "Oauth2AccessToken": "Get one at https://github.com/settings/tokens",
-  "UseSSH": false,
   "Name": "<the hostname by default>",
   "Checks": [
     [
@@ -57,9 +56,6 @@ Edit it based on your needs. Run again and it will start a web server. When
 `sci` is running, updating `sci.json` will make the process quit. It is assumed
 that you use a service manager, like systemd.
 
-To test a private repository, set `UseSSH` to true and use a read-only
-deployment key so your worker has access to the repository.
-
 
 ### OAuth2 token
 
@@ -70,7 +66,7 @@ gits and put success/failure status on the Pull Requests.
 
 ### Webhook
 
-Visit to `github.com/<name>/<repo>/settings/hooks` and create a new webhook.
+Visit to `github.com/user/repo/settings/hooks` and create a new webhook.
 
 - Use your worker IP address or hostname as the hook URL,
   `https://1.2.3.4/github/repoA`.
@@ -95,6 +91,19 @@ systemctl enable sci_update.timer
 systemctl start sci.service
 systemctl start sci_update.timer
 ```
+
+
+### Testing a private repository
+
+`sci` will automatically switch from HTTPS to SSH checkout when the repository
+is private. For it to work you must:
+- On your device, create a key via `ssh-keygen -C "raspberrypi"` and do not
+  specify a password.
+- Visit `github.com/user/repo/settings/keys`, click `Add deploy key`.
+- Put a name of the device and paste the content of the public key at
+  `/home/pi/.ssh/id_rsa.pub`.
+- Do not check `Allow write access`!
+- Click `Add key`.
 
 
 ## Updating
