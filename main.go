@@ -284,8 +284,9 @@ func (s *server) runCheck(repo, commit string) error {
 	}
 	// https://developer.github.com/v3/gists/#create-a-gist
 	// It is still accessible via the URL without authentication.
+	total := len(s.c.Checks) + 1
 	gist := &github.Gist{
-		Description: github.String(s.c.Name + " for https://github.com/" + repo + "/commit/" + commit),
+		Description: github.String(fmt.Sprintf("%s for https://github.com/%s/commit/%s (0/%d)", s.c.Name, repo, commit, total)),
 		Public:      github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
 			"metadata": github.GistFile{Content: github.String(metadata(commit, s.gopath) + "\nCommands to be run:\n" + cmds)},
@@ -315,19 +316,22 @@ func (s *server) runCheck(repo, commit string) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := range results {
+		i := 1
+		for r := range results {
 			// https://developer.github.com/v3/gists/#edit-a-gist
-			if len(i.content) == 0 {
-				i.content = "<missing>"
+			if len(r.content) == 0 {
+				r.content = "<missing>"
 			}
-			if !i.success {
-				i.name += " (failed)"
+			if !r.success {
+				r.name += " (failed)"
 			}
-			gist.Files = map[github.GistFilename]github.GistFile{github.GistFilename(i.name): github.GistFile{Content: &i.content}}
+			gist.Description = github.String(fmt.Sprintf("%s for https://github.com/%s/commit/%s (%d/%d)", s.c.Name, repo, commit, i, total))
+			gist.Files = map[github.GistFilename]github.GistFile{github.GistFilename(r.name): github.GistFile{Content: &r.content}}
 			if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
 				// Just move on.
 				log.Printf("- failed to update gist %v", err)
 			}
+			i++
 		}
 	}()
 	success := runChecks(s.c.Checks, repo, s.c.UseSSH, commit, s.gopath, results)
