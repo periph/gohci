@@ -3,7 +3,7 @@
 ## Genesis
 
 All I wanted was to run `go test ./...` on a Raspberry Pi on both Pull Requests
-and Pushes for a private repository.nd I realized that I could push the test's
+and Pushes for a private repository and I realized that I could push the test's
 stdout to a [Github Gist](https://gist.github.com/).
 
 The result is the distilled essence of a Continuous Integration service.
@@ -15,10 +15,14 @@ It hardly can get any simpler:
 
 - Only support one specific use case: *Golang project hosted on Github*.
 - There is no server, the worker must be internet accessible and HTTPS must be
-  proxied ([Caddy](https://caddyserver.com/) works great along
-  https://letsencrypt.org).
+  proxied down to HTTP.
+  - [Caddy](https://caddyserver.com/) works great along
+    [letsencrypt.org](https://letsencrypt.org).
+- Each check's stdout is "_streamed_" to the gist as they complete.
 - The worker has a configuration file that determines what command it runs to
-  test the project. By default it is `go test ./...`.
+  test the project.
+  - By default it is `go test ./...`. There's no configuration file in the
+    repository itself.
 
 
 ## Installation
@@ -64,7 +68,7 @@ the hex string into `AccessToken` in `sci.json`. This is needed to create the
 gits and put success/failure status on the Pull Requests.
 
 
-### Webhook secret
+### Webhook
 
 Visit to `github.com/<name>/<repo>/settings/hooks` and create a new webhook.
 
@@ -92,6 +96,7 @@ systemctl start sci.service
 systemctl start sci_update.timer
 ```
 
+
 ## Updating
 
 Recompiling will trigger an automatic service restart, so simply run:
@@ -100,11 +105,11 @@ Recompiling will trigger an automatic service restart, so simply run:
 go get -u github.com/maruel/sci
 ```
 
-but it is not necessary, as `sci_update.service` does it for you and the
+but it is not necessary, as `sci_update.service` does it for you and
 `sci_update.timer` runs sci_update every 10 minutes.
 
 
-## Testing
+## Testing locally
 
 To test your hook, run:
 
@@ -114,6 +119,10 @@ sci -test maruel/sci
 
 where `maruel/sci` is replaced with the repository you want to fetch and test at
 `HEAD`. Use `-commit` and it'll create the gist and the status on the commit.
+Useful when testing checks.
+
+The github's "_Redeliver hook_" functionality is also very useful to test your
+setup.
 
 
 ## Security
@@ -125,12 +134,14 @@ be 0wned. That's it. Use a strong webhook secret.
 ## FAQ
 
 
-### `sci` is so aewsome, I want to run it for multiple repositories. How?
+### Run `sci` for multiple repositories on my device?
 
-- Copy paste sci.service multiple times
-- Make each one use a different `WorkingDirectory` value.
+- Copy paste sci.service multiple times. Don't duplicate `sci_update.service`
+  and `sci_update.timer`, just `sci.service`!
+- Make each one use a different `WorkingDirectory=` value.
 - In each directory, create a `sci.json` and use a different `Port`.
-- Register them to systemd and start them.
+- Register and start the services via systemd via `systemctl` commands [listed
+  above](#systemd).
 - Your `Caddyfile` file should look like the following. You can also run Caddy
   directly from your Raspberry Pi if you want.
 
@@ -144,10 +155,45 @@ ci.example.com {
 }
 ```
 
+
 ### Can you add support for node.js, ruby, C++, etc?
 
 I think you are missing the point. That said, forking this code and updating
 `runChecks()` accordingly would do just fine.
+
+
+### Can you add support for `gd`, etc?
+
+I think you are missing the point. That said, forking this code and updating
+`runChecks()` accordingly would do just fine.
+
+
+### Test on multiple kind of hardware simultaneously?
+
+- Install `sci` on each of your devices, e.g. a
+  [C.H.I.P.](https://getchip.com/), a [Raspberry
+  Pi](https://www.raspberrypi.org/), a [Pine64](https://www.pine64.org/), etc.
+- Register multiple webhooks to your repository, one per device, using the
+  [explanations](#webhooks) above. For each hook, use URLs in the format
+  `https://1.2.3.4/github/repoA/deviceX`.
+- Setup your `Caddyfile` like this:
+
+```
+ci.example.com {
+    gzip
+    log log/ci.example.com.log
+    tls youremail@example.com
+    proxy /github/repoA/chip chip:8080
+    proxy /github/repoA/pine64 pine64:8080
+    proxy /github/repoA/rpi3 raspberry:8080
+}
+```
+
+
+### Won't the auto-updater break my CI when you push broken code?
+
+Yes. I'll try to keep `sci` always good but it can fail from time to time. So
+fork the `sci` repository and run from your copy.
 
 
 ### `sci` doesn't have unit tests. Isn't that stupid?
