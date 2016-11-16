@@ -84,6 +84,7 @@ systemctl daemon-reload
 systemctl enable sci.service
 systemctl enable sci_update.timer
 systemctl start sci.service
+systemctl start sci_update.timer
 ```
 
 If you use your own Go version instead of the debian package, you need to add

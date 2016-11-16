@@ -6,6 +6,7 @@
 #   cp sci_update.service /etc/systemd/system
 #   systemctl daemon-reload
 #   systemctl enable sci_update.timer
+#   systemctl start sci_update.timer
 
 # All the flags in the following help pages apply:
 # - https://www.freedesktop.org/software/systemd/man/systemd.timer.html

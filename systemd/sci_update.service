@@ -4,6 +4,10 @@
 
 # To install, run as root:
 #   cp sci_update.service /etc/systemd/system
+#   systemctl daemon-reload
+#
+# To run immediately, run as root:
+#   systemctl start sci_update.timer
 #
 # To view logs:
 #   journalctl -f -u sci_update.service
