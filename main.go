@@ -191,31 +191,10 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 }
 
 type server struct {
-	c       *config
-	client  *github.Client
-	gopath  string
-	mu      sync.Mutex
-	collabs map[string]map[string]bool
-}
-
-func (s *server) canCollab(owner, repo, user string) bool {
-	key := owner + "/" + repo
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.collabs[key]; !ok {
-		s.collabs[key] = map[string]bool{}
-	}
-	if v, ok := s.collabs[key][user]; ok {
-		return v
-	}
-	v, _, _ := s.client.Repositories.IsCollaborator(owner, repo, user)
-	if v {
-		// Only cache hits because otherwise adding a collaborator would mean
-		// restarting every sci instances.
-		s.collabs[key][user] = v
-	}
-	log.Printf("- %s: %s access: %t", key, user, v)
-	return v
+	c      *config
+	client *github.Client
+	gopath string
+	mu     sync.Mutex // Set when a check is running
 }
 
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -246,11 +225,13 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// *github.IssueCommentEvent, when the comment is 'run tests' from a
 			// collaborator, run the tests.
 			case *github.PullRequestEvent:
+				// s.client.Repositories.IsCollaborator() requires *write* access to the
+				// repository, which we really do not want here.
 				log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.ID, *event.Sender.Login, *event.Action)
 				if *event.Action != "opened" && *event.Action != "synchronized" {
 					log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
-				} else if !s.canCollab(*event.Repo.Owner.Login, *event.Repo.Name, *event.Sender.Login) {
-					log.Printf("- ignoring owner %q for PR", *event.Sender.Login)
+				} else if *event.Repo.FullName == *event.PullRequest.Head.Repo.FullName {
+					log.Printf("- ignoring PR from forked repo %q", *event.PullRequest.Head.Repo.FullName)
 				} else if err = s.runCheck(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private); err != nil {
 					log.Printf("- %v", err)
 				}
@@ -345,6 +326,8 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 	}
 	status.Description = github.String("Ran tests")
 	_, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status)
+	// TODO(maruel): If running on a push to refs/heads/master and it failed,
+	// call s.client.Issues.Create().
 	return err
 }
 
@@ -365,7 +348,7 @@ func mainImpl() error {
 	os.Setenv("GOPATH", gopath)
 	os.Setenv("PATH", filepath.Join(gopath, "bin")+":"+os.Getenv("PATH"))
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
-	s := server{c: c, client: github.NewClient(tc), gopath: gopath, collabs: map[string]map[string]bool{}}
+	s := server{c: c, client: github.NewClient(tc), gopath: gopath}
 	if len(*test) != 0 {
 		if *commit == "HEAD" {
 			// Only run locally.

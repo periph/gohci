@@ -59,9 +59,14 @@ that you use a service manager, like systemd.
 
 ### OAuth2 token
 
-Visit https://github.com/settings/tokens, check `repo:status` and `gist`. Put
-the hex string into `AccessToken` in `sci.json`. This is needed to create the
-gits and put success/failure status on the Pull Requests.
+- Visit https://github.com/settings/tokens
+- Click `Personal access tokens` near the bottom in the left list
+- Click `Generate new token`
+- Add a description like `sci`
+- Check `repo:status` and `gist`
+- Click `Generate token`
+- Put the hex string into `AccessToken` in `sci.json`. This is needed to create
+  the gits and put success/failure status on the Pull Requests.
 
 
 ### Webhook
