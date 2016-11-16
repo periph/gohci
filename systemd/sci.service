@@ -30,6 +30,7 @@ Restart=always
 TimeoutStopSec=20s
 ExecStart=/home/pi/bin/sci
 WorkingDirectory=/home/pi/sci
+# Environment=PATH=/home/pi/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin GOROOT=/home/pi/go
 
 [Install]
 WantedBy=multi-user.target
