@@ -18,7 +18,7 @@
 # - https://www.freedesktop.org/software/systemd/man/systemd.unit.html
 
 [Unit]
-Description=Shameful CI
+Description=Stupid CI
 Wants=network-online.target
 After=network-online.target
 
@@ -30,6 +30,8 @@ Restart=always
 TimeoutStopSec=20s
 ExecStart=/home/pi/bin/sci
 WorkingDirectory=/home/pi/sci
+# Set this if you run a custom Go version that is not installed in
+# /usr/local/go.
 # Environment=PATH=/home/pi/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin GOROOT=/home/pi/go
 
 [Install]

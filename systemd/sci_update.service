@@ -26,3 +26,7 @@ Type=oneshot
 User=pi
 Group=pi
 ExecStart=/bin/sh -l -c "go get -v -u github.com/maruel/sci"
+# Set this if you run a custom Go version that is not installed in
+# /usr/local/go.
+# ExecStart=go get -v -u github.com/maruel/sci
+# Environment=PATH=/home/pi/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin GOROOT=/home/pi/go
