@@ -286,7 +286,7 @@ func (s *server) runCheck(repo, commit string) error {
 	// It is still accessible via the URL without authentication.
 	total := len(s.c.Checks) + 1
 	gist := &github.Gist{
-		Description: github.String(fmt.Sprintf("%s for https://github.com/%s/commit/%s (0/%d)", s.c.Name, repo, commit, total)),
+		Description: github.String(fmt.Sprintf("%s for https://github.com/%s/commit/%s (0/%d)", s.c.Name, repo, commit[:12], total)),
 		Public:      github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
 			"metadata": github.GistFile{Content: github.String(metadata(commit, s.gopath) + "\nCommands to be run:\n" + cmds)},
@@ -325,7 +325,7 @@ func (s *server) runCheck(repo, commit string) error {
 			if !r.success {
 				r.name += " (failed)"
 			}
-			gist.Description = github.String(fmt.Sprintf("%s for https://github.com/%s/commit/%s (%d/%d)", s.c.Name, repo, commit, i, total))
+			gist.Description = github.String(fmt.Sprintf("%s for https://github.com/%s/commit/%s (%d/%d)", s.c.Name, repo, commit[:12], i, total))
 			gist.Files = map[github.GistFilename]github.GistFile{github.GistFilename(r.name): github.GistFile{Content: &r.content}}
 			if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
 				// Just move on.
