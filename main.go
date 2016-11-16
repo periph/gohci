@@ -388,7 +388,7 @@ func mainImpl() error {
 			_, err := fmt.Printf("\nSuccess: %t\n", success)
 			return err
 		}
-		return s.runCheck(*test, *commit)
+		return s.runCheck(*test, *commit, *useSSH)
 	}
 	http.Handle("/", &s)
 	thisFile, err := osext.Executable()

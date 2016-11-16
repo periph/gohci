@@ -203,6 +203,7 @@ ci.example.com {
 
 Yes. I'll try to keep `sci` always in a working condition but it can fail from
 time to time. So feel free to fork the `sci` repository and run from your copy.
+Don't forget to update `sci_update.timer` to pull from your repository instead.
 It'll work just fine.
 
 
