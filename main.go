@@ -456,9 +456,11 @@ func mainImpl() error {
 		return err
 	}
 	gopath := filepath.Join(wd, "sci-gopath")
-	_, useGT := run("go", "get", "rsc.io/gt")
+	stdout, useGT := run("go", "get", "rsc.io/gt")
 	if useGT {
 		os.Setenv("CACHE", gopath)
+	} else {
+		log.Print(stdout)
 	}
 	os.Setenv("GOPATH", gopath)
 	os.Setenv("PATH", filepath.Join(gopath, "bin")+":"+os.Getenv("PATH"))
