@@ -155,7 +155,7 @@ func cloneOrFetch(repoPath, cloneURL string) (string, bool) {
 }
 
 func fetch(repoPath string) (string, bool) {
-	stdout, ok := run(repoPath, "git", "pull", "--prune", "--quiet", "--ff-only")
+	stdout, ok := run(repoPath, "git", "pull", "--prune", "--quiet")
 	if !ok {
 		// Give up and delete the repository. At worst "go get" will fetch
 		// it below.
