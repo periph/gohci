@@ -149,13 +149,13 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 	repoURL := "github.com/" + repoName
 	src := filepath.Join(gopath, "src")
 	repoPath := filepath.Join(src, repoURL)
-	var wg1 sync.WaitGroup
-	var wg2 sync.WaitGroup
+	var wg sync.WaitGroup
+	var wgC sync.WaitGroup
 	c := make(chan item)
-	wg1.Add(1)
+	wg.Add(1)
 	var setup item
 	go func() {
-		defer wg1.Done()
+		defer wg.Done()
 		for i := range c {
 			setup.content += i.content
 			if !i.ok {
@@ -163,9 +163,9 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 			}
 		}
 	}()
-	wg2.Add(1)
+	wgC.Add(1)
 	go func() {
-		defer wg2.Done()
+		defer wgC.Done()
 		if _, err2 := os.Stat(repoPath); err2 == nil {
 			stdout2, ok2 := run(repoPath, "git", "fetch", "--prune", "--quiet", "--ff-only")
 			c <- item{stdout2, ok2}
@@ -195,9 +195,9 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 			path = filepath.Dir(path)
 			if path != repoPath {
 				// repoPath is handled specifically.
-				wg1.Add(1)
+				wgC.Add(1)
 				go func(p string) {
-					defer wg2.Done()
+					defer wgC.Done()
 					stdout1, ok1 := run(p, "git", "pull", "--prune", "--quiet", "--ff-only")
 					if !ok1 {
 						// Give up and delete the repository. At worst "go get" will fetch
@@ -217,9 +217,9 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 		}
 		return nil
 	})
-	wg2.Wait()
+	wgC.Wait()
 	close(c)
-	wg1.Wait()
+	wg.Wait()
 	if !setup.ok {
 		results <- file{"setup", setup.content, false}
 		return false
