@@ -236,7 +236,7 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 			setup.ok = false
 		}
 	}
-	results <- file{"setup-1-sync", setup.content, false}
+	results <- file{"setup-1-sync", setup.content, setup.ok}
 	if !setup.ok {
 		return false
 	}
