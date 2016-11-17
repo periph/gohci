@@ -167,7 +167,7 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 	go func() {
 		defer wgC.Done()
 		if _, err2 := os.Stat(repoPath); err2 == nil {
-			stdout2, ok2 := run(repoPath, "git", "fetch", "--prune", "--quiet", "--ff-only")
+			stdout2, ok2 := run(repoPath, "git", "fetch", "--prune", "--quiet")
 			c <- item{stdout2, ok2}
 			return
 		} else if !os.IsExist(err2) {
