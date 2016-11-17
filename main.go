@@ -236,13 +236,15 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 			setup.ok = false
 		}
 	}
+	results <- file{"setup-1-sync", setup.content, false}
 	if !setup.ok {
-		results <- file{"setup", setup.content, false}
 		return false
 	}
+
 	repoPath := filepath.Join(src, repoURL)
 	stdout, ok := run(repoPath, "git", "checkout", "--quiet", commit)
-	setup.content += stdout
+	// Reuse the object.
+	setup.content = stdout
 	if ok {
 		stdout, ok = run(repoPath, "go", "get", "-v", "-d", "-t", "./...")
 		setup.content += stdout
@@ -252,7 +254,7 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 			setup.content += stdout
 		}
 	}
-	results <- file{"setup", setup.content, ok}
+	results <- file{"setup-2-get", setup.content, ok}
 	if ok {
 		// Finally run the checks!
 		for i, cmd := range cmds {
