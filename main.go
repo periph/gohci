@@ -141,7 +141,7 @@ type item struct {
 	ok      bool
 }
 
-func cloneOrFetch(repoPath, cloneURL string) (string, ok) {
+func cloneOrFetch(repoPath, cloneURL string) (string, bool) {
 	if _, err := os.Stat(repoPath); err == nil {
 		return run(repoPath, "git", "fetch", "--prune", "--quiet")
 	} else if !os.IsExist(err) {
@@ -154,7 +154,7 @@ func cloneOrFetch(repoPath, cloneURL string) (string, ok) {
 	return run(up, "git", "clone", "--quiet", cloneURL)
 }
 
-func fetch(repoPath) (string, ok) {
+func fetch(repoPath string) (string, bool) {
 	stdout, ok := run(repoPath, "git", "pull", "--prune", "--quiet", "--ff-only")
 	if !ok {
 		// Give up and delete the repository. At worst "go get" will fetch
@@ -226,7 +226,7 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 		cloneURL = "git@github.com:" + repoName
 	}
 	go func() {
-		syncParallel(src, relRepo, cloneURL, c)
+		syncParallel(src, repoURL, cloneURL, c)
 		close(c)
 	}()
 	setup := item{"", true}
