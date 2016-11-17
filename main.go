@@ -138,9 +138,11 @@ func run(cwd string, cmd ...string) (string, bool) {
 	return fmt.Sprintf("$ %s  (exit:%d in %s)\n%s", cmds, exit, roundTime(duration), string(normalizeUTF8(out))), err == nil
 }
 
+// file is an item in the gist.
 type file struct {
 	name, content string
 	success       bool
+	d             time.Duration
 }
 
 func metadata(commit, gopath string) string {
@@ -238,6 +240,7 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 	if useSSH {
 		cloneURL = "git@github.com:" + repoName
 	}
+	start := time.Now()
 	go func() {
 		syncParallel(src, repoURL, cloneURL, c)
 		close(c)
@@ -249,11 +252,12 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 			setup.ok = false
 		}
 	}
-	results <- file{"setup-1-sync", setup.content, setup.ok}
+	results <- file{"setup-1-sync", setup.content, setup.ok, time.Since(start)}
 	if !setup.ok {
 		return false
 	}
 
+	start = time.Now()
 	repoPath := filepath.Join(src, repoURL)
 	stdout, ok := run(repoPath, "git", "checkout", "--quiet", commit)
 	// Reuse the object.
@@ -267,12 +271,13 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 			setup.content += stdout
 		}
 	}
-	results <- file{"setup-2-get", setup.content, ok}
+	results <- file{"setup-2-get", setup.content, ok, time.Since(start)}
 	if ok {
 		// Finally run the checks!
 		for i, cmd := range cmds {
+			start = time.Now()
 			stdout, ok2 := run(repoPath, cmd...)
-			results <- file{fmt.Sprintf("cmd%d", i+1), stdout, ok2}
+			results <- file{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
 			if !ok2 {
 				// Still run the other tests.
 				ok = false
@@ -365,7 +370,7 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 		Description: github.String(desc + fmt.Sprintf(" (0/%d)", total)),
 		Public:      github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
-			"metadata": github.GistFile{Content: github.String(metadata(commit, s.gopath) + "\nCommands to be run:\n" + cmds)},
+			"setup-0-metadata": github.GistFile{Content: github.String(metadata(commit, s.gopath) + "\nCommands to be run:\n" + cmds)},
 		},
 	}
 	gist, _, err := s.client.Gists.Create(gist)
@@ -408,7 +413,9 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 			}
 			suffix += " in " + roundTime(time.Since(start)).String()
 			gist.Description = github.String(desc + suffix)
-			gist.Files = map[github.GistFilename]github.GistFile{github.GistFilename(r.name): github.GistFile{Content: &r.content}}
+			gist.Files = map[github.GistFilename]github.GistFile{
+				github.GistFilename(r.name + " in " + roundTime(r.d).String()): github.GistFile{Content: &r.content},
+			}
 			if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
 				// Just move on.
 				log.Printf("- failed to update gist %v", err)
@@ -463,7 +470,7 @@ func mainImpl() error {
 					fmt.Printf("--- %s\n%s", i.name, i.content)
 				}
 			}()
-			fmt.Printf("--- metadata\n%s", metadata(*commit, gopath))
+			fmt.Printf("--- setup-0-metadata\n%s", metadata(*commit, gopath))
 			success := runChecks(c.Checks, *test, *useSSH, *commit, gopath, results)
 			close(results)
 			wg.Wait()
