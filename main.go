@@ -102,6 +102,19 @@ func normalizeUTF8(b []byte) []byte {
 	return out
 }
 
+func roundTime(t time.Duration) time.Duration {
+	if t < time.Millisecond {
+		// Precise at 1ns.
+		return t
+	}
+	if t < time.Second {
+		// Precise at 1µs.
+		return (t + time.Microsecond/2) / time.Microsecond * time.Microsecond
+	}
+	// Round at 1ms
+	return (t + time.Millisecond/2) / time.Millisecond * time.Millisecond
+}
+
 func run(cwd string, cmd ...string) (string, bool) {
 	cmds := strings.Join(cmd, " ")
 	log.Printf("- cwd=%s : %s", cwd, cmds)
@@ -122,7 +135,7 @@ func run(cwd string, cmd ...string) (string, bool) {
 			}
 		}
 	}
-	return fmt.Sprintf("$ %s  (exit:%d in %s)\n%s", cmds, exit, duration, string(normalizeUTF8(out))), err == nil
+	return fmt.Sprintf("$ %s  (exit:%d in %s)\n%s", cmds, exit, roundTime(duration), string(normalizeUTF8(out))), err == nil
 }
 
 type file struct {
@@ -380,7 +393,7 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		i := 2
+		i := 1
 		for r := range results {
 			// https://developer.github.com/v3/gists/#edit-a-gist
 			if len(r.content) == 0 {
@@ -393,7 +406,7 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 			if i != total {
 				suffix = fmt.Sprintf(" (%d/%d)", i, total)
 			}
-			suffix += " in " + time.Since(start).String()
+			suffix += " in " + roundTime(time.Since(start)).String()
 			gist.Description = github.String(desc + suffix)
 			gist.Files = map[github.GistFilename]github.GistFile{github.GistFilename(r.name): github.GistFile{Content: &r.content}}
 			if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
