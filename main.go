@@ -141,6 +141,78 @@ type item struct {
 	ok      bool
 }
 
+func cloneOrFetch(repoPath, cloneURL string) (string, ok) {
+	if _, err := os.Stat(repoPath); err == nil {
+		return run(repoPath, "git", "fetch", "--prune", "--quiet")
+	} else if !os.IsExist(err) {
+		return err.Error(), false
+	}
+	up := path.Dir(repoPath)
+	if err := os.MkdirAll(up, 0700); err != nil {
+		return err.Error(), false
+	}
+	return run(up, "git", "clone", "--quiet", cloneURL)
+}
+
+func fetch(repoPath) (string, ok) {
+	stdout, ok := run(repoPath, "git", "pull", "--prune", "--quiet", "--ff-only")
+	if !ok {
+		// Give up and delete the repository. At worst "go get" will fetch
+		// it below.
+		if err := os.RemoveAll(repoPath); err != nil {
+			// Deletion failed, that's a hard failure.
+			return stdout + "<failure>\n" + err.Error() + "\n", false
+		}
+		return stdout + "<recovered failure>\nrm -rf " + repoPath + "\n", true
+	}
+	return stdout, ok
+}
+
+// syncParallel checkouts out one repository if missing, and syncs all the
+// other git repositories found under the root directory concurrently.
+//
+// Since fetching is a remote operation with potentially low CPU and I/O,
+// reduce the total latency by doing all the fetches concurrently.
+//
+// The goal is to make "go get -t -d" as fast as possible, as all repositories
+// are already synced to HEAD.
+func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
+	// relRepo is handled differently than the other.
+	repoPath := filepath.Join(root, relRepo)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		stdout, ok := cloneOrFetch(repoPath, cloneURL)
+		c <- item{stdout, ok}
+	}()
+	// Sync all the repositories concurrently.
+	err := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == repoPath {
+			// repoPath is handled specifically above.
+			return filepath.SkipDir
+		}
+		if fi.Name() == ".git" {
+			path = filepath.Dir(path)
+			wg.Add(1)
+			go func(p string) {
+				defer wg.Done()
+				stdout, ok := fetch(p)
+				c <- item{stdout, ok}
+			}(path)
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	wg.Wait()
+	if err != nil {
+		c <- item{"<directory walking failure>\n" + err.Error(), false}
+	}
+}
+
 // runChecks syncs then runs the checks and returns task's results.
 //
 // It aggressively concurrently fetches all repositories in `gopath` to
@@ -148,86 +220,27 @@ type item struct {
 func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath string, results chan<- file) bool {
 	repoURL := "github.com/" + repoName
 	src := filepath.Join(gopath, "src")
-	repoPath := filepath.Join(src, repoURL)
-	var wg sync.WaitGroup
-	var wgC sync.WaitGroup
 	c := make(chan item)
-	wg.Add(1)
+	cloneURL := "https://" + repoURL
+	if useSSH {
+		cloneURL = "git@github.com:" + repoName
+	}
+	go func() {
+		syncParallel(src, relRepo, cloneURL, c)
+		close(c)
+	}()
 	setup := item{"", true}
-	go func() {
-		defer wg.Done()
-		for i := range c {
-			setup.content += i.content
-			if !i.ok {
-				setup.ok = false
-			}
+	for i := range c {
+		setup.content += i.content
+		if !i.ok {
+			setup.ok = false
 		}
-	}()
-	wgC.Add(1)
-	go func() {
-		defer wgC.Done()
-		if _, err2 := os.Stat(repoPath); err2 == nil {
-			stdout2, ok2 := run(repoPath, "git", "fetch", "--prune", "--quiet")
-			c <- item{stdout2, ok2}
-			return
-		} else if !os.IsExist(err2) {
-			c <- item{err2.Error(), false}
-			return
-		}
-		up := path.Dir(repoPath)
-		if err2 := os.MkdirAll(up, 0700); err2 != nil {
-			c <- item{err2.Error(), false}
-			return
-		}
-		url := "https://" + repoURL
-		if useSSH {
-			url = "git@github.com:" + repoName
-		}
-		stdout2, ok2 := run(up, "git", "clone", "--quiet", url)
-		c <- item{stdout2, ok2}
-	}()
-	// Sync all the repositories concurrently.
-	err := filepath.Walk(src, func(path string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if fi.Name() == ".git" {
-			path = filepath.Dir(path)
-			if path != repoPath {
-				// repoPath is handled specifically.
-				wgC.Add(1)
-				go func(p string) {
-					defer wgC.Done()
-					stdout1, ok1 := run(p, "git", "pull", "--prune", "--quiet", "--ff-only")
-					if !ok1 {
-						// Give up and delete the repository. At worst "go get" will fetch
-						// it below.
-						if err = os.RemoveAll(p); err != nil {
-							// Deletion failed, that's a hard failure.
-							c <- item{stdout1 + "<failure>\n" + err.Error() + "\n", false}
-							return
-						}
-						stdout1 += "<recovered failure>\nrm -rf " + path + "\n"
-						ok1 = true
-					}
-					c <- item{stdout1, ok1}
-				}(path)
-			}
-			return filepath.SkipDir
-		}
-		return nil
-	})
-	wgC.Wait()
-	close(c)
-	wg.Wait()
+	}
 	if !setup.ok {
 		results <- file{"setup", setup.content, false}
 		return false
 	}
-	if err != nil {
-		results <- file{"setup", setup.content + "<failure>\n" + err.Error() + "\n", false}
-		return false
-	}
+	repoPath := filepath.Join(src, repoURL)
 	stdout, ok := run(repoPath, "git", "checkout", "--quiet", commit)
 	setup.content += stdout
 	if ok {
