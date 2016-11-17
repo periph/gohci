@@ -232,7 +232,7 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 //
 // It aggressively concurrently fetches all repositories in `gopath` to
 // accelerate the processing.
-func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath string, useGT bool, results chan<- file) bool {
+func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath string, results chan<- file) bool {
 	repoURL := "github.com/" + repoName
 	src := filepath.Join(gopath, "src")
 	c := make(chan item)
@@ -276,10 +276,6 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 		// Finally run the checks!
 		for i, cmd := range cmds {
 			start = time.Now()
-			if useGT && len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
-				cmd[1] = "gt"
-				cmd = cmd[1:]
-			}
 			stdout, ok2 := run(repoPath, cmd...)
 			results <- file{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
 			if !ok2 {
@@ -295,7 +291,6 @@ type server struct {
 	c      *config
 	client *github.Client
 	gopath string
-	useGT  bool
 	mu     sync.Mutex // Set when a check is running
 }
 
@@ -428,7 +423,7 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 			i++
 		}
 	}()
-	success := runChecks(s.c.Checks, repo, useSSH, commit, s.gopath, s.useGT, results)
+	success := runChecks(s.c.Checks, repo, useSSH, commit, s.gopath, results)
 	close(results)
 	wg.Wait()
 
@@ -458,14 +453,21 @@ func mainImpl() error {
 	gopath := filepath.Join(wd, "sci-gopath")
 	stdout, useGT := run(wd, "go", "get", "rsc.io/gt")
 	if useGT {
+		log.Print("Using gt")
 		os.Setenv("CACHE", gopath)
+		for i, cmd := range c.Checks {
+			if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
+				cmd[1] = "gt"
+				c.Checks[i] = cmd[1:]
+			}
+		}
 	} else {
 		log.Print(stdout)
 	}
 	os.Setenv("GOPATH", gopath)
 	os.Setenv("PATH", filepath.Join(gopath, "bin")+":"+os.Getenv("PATH"))
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
-	s := server{c: c, client: github.NewClient(tc), gopath: gopath, useGT: useGT}
+	s := server{c: c, client: github.NewClient(tc), gopath: gopath}
 	if len(*test) != 0 {
 		if *commit == "HEAD" {
 			// Only run locally.
@@ -482,7 +484,7 @@ func mainImpl() error {
 				}
 			}()
 			fmt.Printf("--- setup-0-metadata\n%s", metadata(*commit, gopath))
-			success := runChecks(c.Checks, *test, *useSSH, *commit, gopath, s.useGT, results)
+			success := runChecks(c.Checks, *test, *useSSH, *commit, gopath, results)
 			close(results)
 			wg.Wait()
 			_, err := fmt.Printf("\nSuccess: %t\n", success)
