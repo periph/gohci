@@ -153,7 +153,7 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 	var wgC sync.WaitGroup
 	c := make(chan item)
 	wg.Add(1)
-	var setup item
+	setup := item{"", true}
 	go func() {
 		defer wg.Done()
 		for i := range c {
