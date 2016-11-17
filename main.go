@@ -451,6 +451,11 @@ func mainImpl() error {
 		return err
 	}
 	gopath := filepath.Join(wd, "sci-gopath")
+	// GOPATH may not be set especially when running from systemd, so use the
+	// local GOPATH to install gt. This is safer as this doesn't modify the host
+	// environment.
+	os.Setenv("GOPATH", gopath)
+	os.Setenv("PATH", filepath.Join(gopath, "bin")+":"+os.Getenv("PATH"))
 	stdout, useGT := run(wd, "go", "get", "rsc.io/gt")
 	if useGT {
 		log.Print("Using gt")
@@ -464,8 +469,6 @@ func mainImpl() error {
 	} else {
 		log.Print(stdout)
 	}
-	os.Setenv("GOPATH", gopath)
-	os.Setenv("PATH", filepath.Join(gopath, "bin")+":"+os.Getenv("PATH"))
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
 	s := server{c: c, client: github.NewClient(tc), gopath: gopath}
 	if len(*test) != 0 {
