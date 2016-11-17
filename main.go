@@ -136,53 +136,117 @@ func metadata(commit, gopath string) string {
 		commit, runtime.NumCPU(), runtime.Version(), runtime.GOROOT(), gopath, os.Getenv("PATH"))
 }
 
+type item struct {
+	content string
+	ok      bool
+}
+
 // runChecks syncs then runs the checks and returns task's results.
+//
+// It aggressively concurrently fetches all repositories in `gopath` to
+// accelerate the processing.
 func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath string, results chan<- file) bool {
-	repoPath := "github.com/" + repoName
-	base := filepath.Join(gopath, "src", repoPath)
-	setup := ""
-	if _, err := os.Stat(base); err != nil {
-		up := path.Dir(base)
-		if err := os.MkdirAll(up, 0700); err != nil && !os.IsExist(err) {
-			log.Printf("- %v", err)
+	repoURL := "github.com/" + repoName
+	src := filepath.Join(gopath, "src")
+	repoPath := filepath.Join(src, repoURL)
+	var wg1 sync.WaitGroup
+	var wg2 sync.WaitGroup
+	c := make(chan item)
+	wg1.Add(1)
+	var setup item
+	go func() {
+		defer wg1.Done()
+		for i := range c {
+			setup.content += i.content
+			if !i.ok {
+				setup.ok = false
+			}
 		}
-		url := "https://" + repoPath
+	}()
+	wg2.Add(1)
+	go func() {
+		defer wg2.Done()
+		if _, err2 := os.Stat(repoPath); err2 == nil {
+			stdout2, ok2 := run(repoPath, "git", "fetch", "--prune", "--quiet", "--ff-only")
+			c <- item{stdout2, ok2}
+			return
+		} else if !os.IsExist(err2) {
+			c <- item{err2.Error(), false}
+			return
+		}
+		up := path.Dir(repoPath)
+		if err2 := os.MkdirAll(up, 0700); err2 != nil {
+			c <- item{err2.Error(), false}
+			return
+		}
+		url := "https://" + repoURL
 		if useSSH {
 			url = "git@github.com:" + repoName
 		}
-		stdout, ok := run(up, "git", "clone", "--quiet", url)
-		setup = stdout
-		if !ok {
-			results <- file{"setup", setup, ok}
-			return ok
+		stdout2, ok2 := run(up, "git", "clone", "--quiet", url)
+		c <- item{stdout2, ok2}
+	}()
+	// Sync all the repositories concurrently.
+	err := filepath.Walk(src, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
 		}
-	} else {
-		stdout, ok := run(base, "git", "fetch", "--prune", "--quiet")
-		setup = stdout
-		if !ok {
-			results <- file{"setup", setup, ok}
-			return ok
+		if fi.Name() == ".git" {
+			path = filepath.Dir(path)
+			if path != repoPath {
+				// repoPath is handled specifically.
+				wg1.Add(1)
+				go func(p string) {
+					defer wg2.Done()
+					stdout1, ok1 := run(p, "git", "pull", "--prune", "--quiet", "--ff-only")
+					if !ok1 {
+						// Give up and delete the repository. At worst "go get" will fetch
+						// it below.
+						if err = os.RemoveAll(p); err != nil {
+							// Deletion failed, that's a hard failure.
+							c <- item{stdout1 + "<failure>\n" + err.Error() + "\n", false}
+							return
+						}
+						stdout1 += "<recovered failure>\nrm -rf " + path + "\n"
+						ok1 = true
+					}
+					c <- item{stdout1, ok1}
+				}(path)
+			}
+			return filepath.SkipDir
 		}
+		return nil
+	})
+	wg2.Wait()
+	close(c)
+	wg1.Wait()
+	if !setup.ok {
+		results <- file{"setup", setup.content, false}
+		return false
 	}
-	stdout, ok := run(base, "git", "checkout", "--quiet", commit)
-	setup += stdout
+	if err != nil {
+		results <- file{"setup", setup.content + "<failure>\n" + err.Error() + "\n", false}
+		return false
+	}
+	stdout, ok := run(repoPath, "git", "checkout", "--quiet", commit)
+	setup.content += stdout
 	if ok {
-		// TODO(maruel): update dependencies manually!
-		stdout, ok = run(base, "go", "get", "-v", "-d", "-t", "./...")
-		setup += stdout
+		stdout, ok = run(repoPath, "go", "get", "-v", "-d", "-t", "./...")
+		setup.content += stdout
 		if ok {
 			// Precompilation has a dramatic effect on a Raspberry Pi.
-			stdout, ok = run(base, "go", "test", "-i", "./...")
-			setup += stdout
+			stdout, ok = run(repoPath, "go", "test", "-i", "./...")
+			setup.content += stdout
 		}
 	}
-	results <- file{"setup", setup, ok}
+	results <- file{"setup", setup.content, ok}
 	if ok {
 		// Finally run the checks!
 		for i, cmd := range cmds {
-			stdout, ok2 := run(base, cmd...)
+			stdout, ok2 := run(repoPath, cmd...)
 			results <- file{fmt.Sprintf("cmd%d", i+1), stdout, ok2}
 			if !ok2 {
+				// Still run the other tests.
 				ok = false
 			}
 		}
