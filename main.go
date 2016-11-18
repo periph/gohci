@@ -124,7 +124,7 @@ func run(cwd string, cmd ...string) (string, bool) {
 	out, err := c.CombinedOutput()
 	duration := time.Since(start)
 	if len(out) == 0 && err != nil {
-		out = []byte(err.Error())
+		out = []byte("<failure>\n" + err.Error() + "\n")
 	}
 	exit := 0
 	if err != nil {
@@ -159,12 +159,12 @@ type item struct {
 func cloneOrFetch(repoPath, cloneURL string) (string, bool) {
 	if _, err := os.Stat(repoPath); err == nil {
 		return run(repoPath, "git", "fetch", "--prune", "--quiet")
-	} else if !os.IsExist(err) {
-		return err.Error(), false
+	} else if !os.IsNotExist(err) {
+		return "<failure>\n" + err.Error() + "\n", false
 	}
 	up := path.Dir(repoPath)
 	if err := os.MkdirAll(up, 0700); err != nil {
-		return err.Error(), false
+		return "<failure>\n" + err.Error() + "\n", false
 	}
 	return run(up, "git", "clone", "--quiet", cloneURL)
 }
@@ -224,7 +224,7 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 	})
 	wg.Wait()
 	if err != nil {
-		c <- item{"<directory walking failure>\n" + err.Error(), false}
+		c <- item{"<directory walking failure>\n" + err.Error() + "\n", false}
 	}
 }
 
