@@ -399,6 +399,7 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 	go func() {
 		defer wg.Done()
 		i := 1
+		failed := false
 		for r := range results {
 			// https://developer.github.com/v3/gists/#edit-a-gist
 			if len(r.content) == 0 {
@@ -406,16 +407,20 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 			}
 			if !r.success {
 				r.name += " (failed)"
+				failed = true
 			}
+			gist.Files = map[github.GistFilename]github.GistFile{
+				github.GistFilename(r.name + " in " + roundTime(r.d).String()): github.GistFile{Content: &r.content},
+			}
+
 			suffix := ""
 			if i != total {
 				suffix = fmt.Sprintf(" (%d/%d)", i, total)
 			}
-			suffix += " in " + roundTime(time.Since(start)).String()
-			gist.Description = github.String(desc + suffix)
-			gist.Files = map[github.GistFilename]github.GistFile{
-				github.GistFilename(r.name + " in " + roundTime(r.d).String()): github.GistFile{Content: &r.content},
+			if failed {
+				suffix += " (failed)"
 			}
+			gist.Description = github.String(desc + suffix + " in " + roundTime(time.Since(start)).String())
 			if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
 				// Just move on.
 				log.Printf("- failed to update gist %v", err)
