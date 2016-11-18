@@ -439,6 +439,7 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 	_, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status)
 	// TODO(maruel): If running on a push to refs/heads/master and it failed,
 	// call s.client.Issues.Create().
+	log.Printf("- testing done: https://github.com/%s/commit/%s", repo, commit[:12])
 	return err
 }
 
