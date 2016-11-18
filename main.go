@@ -123,12 +123,12 @@ func run(cwd string, cmd ...string) (string, bool) {
 	start := time.Now()
 	out, err := c.CombinedOutput()
 	duration := time.Since(start)
-	if len(out) == 0 && err != nil {
-		out = []byte("<failure>\n" + err.Error() + "\n")
-	}
 	exit := 0
 	if err != nil {
 		exit = -1
+		if len(out) == 0 {
+			out = []byte("<failure>\n" + err.Error() + "\n")
+		}
 		if exiterr, ok := err.(*exec.ExitError); ok {
 			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
 				exit = status.ExitStatus()
