@@ -462,18 +462,27 @@ func mainImpl() error {
 	// environment.
 	os.Setenv("GOPATH", gopath)
 	os.Setenv("PATH", filepath.Join(gopath, "bin")+":"+os.Getenv("PATH"))
-	stdout, useGT := run(wd, "go", "get", "rsc.io/gt")
-	if useGT {
-		log.Print("Using gt")
-		os.Setenv("CACHE", gopath)
-		for i, cmd := range c.Checks {
-			if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
-				cmd[1] = "gt"
-				c.Checks[i] = cmd[1:]
-			}
+	hasTest := false
+	for i, cmd := range c.Checks {
+		if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
+			hasTest = true
+			break
 		}
-	} else {
-		log.Print(stdout)
+	}
+	if hasTest {
+		stdout, useGT := run(wd, "go", "get", "rsc.io/gt")
+		if useGT {
+			log.Print("Using gt")
+			os.Setenv("CACHE", gopath)
+			for i, cmd := range c.Checks {
+				if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
+					cmd[1] = "gt"
+					c.Checks[i] = cmd[1:]
+				}
+			}
+		} else {
+			log.Print(stdout)
+		}
 	}
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
 	s := server{c: c, client: github.NewClient(tc), gopath: gopath}
