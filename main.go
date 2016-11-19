@@ -407,9 +407,8 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 				r.name += " (failed)"
 				failed = true
 			}
-			gist.Files = map[github.GistFilename]github.GistFile{
-				github.GistFilename(r.name + " in " + roundTime(r.d).String()): github.GistFile{Content: &r.content},
-			}
+			name := r.name + " in " + roundTime(r.d).String()
+			gist.Files = map[github.GistFilename]github.GistFile{github.GistFilename(name): github.GistFile{Content: &r.content}}
 
 			suffix := ""
 			if i != total {
@@ -424,6 +423,8 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 			if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
 				// Just move on.
 				log.Printf("- failed to update gist %v", err)
+			} else {
+				log.Printf("- gists updated with %s", name)
 			}
 			i++
 		}
@@ -448,6 +449,7 @@ func mainImpl() error {
 	commit := flag.String("commit", "HEAD", "commit ID to test and update; will only update if not 'HEAD'")
 	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS")
 	flag.Parse()
+	log.SetFlags(0)
 	c, err := loadConfig()
 	if err != nil {
 		return err
@@ -463,7 +465,7 @@ func mainImpl() error {
 	os.Setenv("GOPATH", gopath)
 	os.Setenv("PATH", filepath.Join(gopath, "bin")+":"+os.Getenv("PATH"))
 	hasTest := false
-	for i, cmd := range c.Checks {
+	for _, cmd := range c.Checks {
 		if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
 			hasTest = true
 			break
