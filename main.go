@@ -416,6 +416,8 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 			suffix := ""
 			if i != total {
 				suffix = fmt.Sprintf(" (%d/%d)", i, total)
+			} else if !failed {
+				suffix += " (success!)"
 			}
 			if failed {
 				suffix += " (failed)"
