@@ -2,14 +2,12 @@
 // Use of this source code is governed under the Apache License, Version 2.0
 // that can be found in the LICENSE file.
 
-// sci is a shameful CI.
+// sci is a stupid CI.
 //
-// It is a simple Github webhook that runs a Go build and an hardcoded
-// command upon PR or push from whitelisted users.
+// It implements a github webhook webserver that runs a Go build and a list of
+// user supplied commands upon PR or pushes.
 //
-// It posts the stdout to a Github gist and updates the PR status.
-//
-// It doesn't stream data so it cannot be used for slow task.
+// It posts the stdout to a Github gist and updates the commit's status.
 package main
 
 import (
