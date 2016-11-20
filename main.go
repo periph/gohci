@@ -133,7 +133,7 @@ func run(cwd string, cmd ...string) (string, bool) {
 			}
 		}
 	}
-	return fmt.Sprintf("$ %s  (exit:%d in %s)\n%s", cmds, exit, roundTime(duration), string(normalizeUTF8(out))), err == nil
+	return fmt.Sprintf("$ %s  (exit:%d in %s)\n%s", cmds, exit, roundTime(duration), normalizeUTF8(out)), err == nil
 }
 
 // file is an item in the gist.
@@ -270,12 +270,14 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 		}
 	}
 	results <- file{"setup-2-get", setup.content, ok, time.Since(start)}
+	setup.content = ""
 	if ok {
 		// Finally run the checks!
 		for i, cmd := range cmds {
 			start = time.Now()
 			stdout, ok2 := run(repoPath, cmd...)
 			results <- file{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
+			stdout = ""
 			if !ok2 {
 				// Still run the other tests.
 				ok = false
@@ -427,6 +429,7 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 				log.Printf("- gists updated with: %s", name)
 			}
 			i++
+			gist.Files = nil
 		}
 	}()
 	success := runChecks(s.c.Checks, repo, useSSH, commit, s.gopath, results)
