@@ -215,3 +215,13 @@ It'll work just fine.
 ### `sci` doesn't have unit tests. Isn't that stupid?
 
 I think you are missing the point.
+
+
+### What's the max testing rate per hour?
+
+Github enforces [5000 requests per
+hour](https://developer.github.com/v3/#rate-limiting) for authenticated
+requests. Each test run does 3 create status requests, 1 gist create request
+including the 'metadata' stream then one gist edit request per additional
+stream, including the two 'setup' streams. So a configuration defining 7 tests
+would sum for 3+1+2+7=13 requests. 5000/13 = 384 tests run/hour.
