@@ -257,7 +257,9 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 
 	start = time.Now()
 	repoPath := filepath.Join(src, repoURL)
-	stdout, ok := run(repoPath, "git", "checkout", "--quiet", commit)
+	// go get will try to pull and will complain if the checkout is not on a
+	// branch.
+	stdout, ok := run(repoPath, "git", "checkout", "--quiet", "-B", "test", commit)
 	// Reuse the object.
 	setup.content = stdout
 	if ok {
