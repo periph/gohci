@@ -3,13 +3,13 @@
 # that can be found in the LICENSE file.
 
 # To install, run as root:
-#   cp sci.service /etc/systemd/system
+#   cp gohci.service /etc/systemd/system
 #   systemctl daemon-reload
-#   systemctl enable sci.service
-#   systemctl start sci.service
+#   systemctl enable gohci.service
+#   systemctl start gohci.service
 #
 # To view logs:
-#   journalctl -f -u sci.service
+#   journalctl -f -u gohci.service
 
 # All the flags in the following help pages apply:
 # - https://www.freedesktop.org/software/systemd/man/systemd.exec.html
@@ -19,7 +19,7 @@
 # - https://www.freedesktop.org/software/systemd/man/systemd.unit.html
 
 [Unit]
-Description=Stupid CI
+Description=Go on Hardware CI
 Wants=network-online.target
 After=network-online.target
 
@@ -29,8 +29,8 @@ Group=pi
 KillMode=mixed
 Restart=always
 TimeoutStopSec=20s
-ExecStart=/home/pi/bin/sci
-WorkingDirectory=/home/pi/sci
+ExecStart=/home/pi/bin/go/gohci
+WorkingDirectory=/home/pi/gohci
 
 # To use port 80:
 #  # Systemd 229:
@@ -41,7 +41,7 @@ WorkingDirectory=/home/pi/sci
 
 # Set this if you run a custom Go version that is not installed in
 # /usr/local/go:
-# Environment=PATH=/home/pi/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin GOROOT=/home/pi/go
+# Environment=PATH=/home/pi/golang/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin GOROOT=/home/pi/golang GOPATH=/home/pi/go
 
 [Install]
 WantedBy=multi-user.target

@@ -3,14 +3,14 @@
 # that can be found in the LICENSE file.
 
 # To install, run as root:
-#   cp sci_update.service /etc/systemd/system
+#   cp gohci_update.service /etc/systemd/system
 #   systemctl daemon-reload
 #
 # To run immediately, run as root:
-#   systemctl start sci_update.timer
+#   systemctl start gohci_update.timer
 #
 # To view logs:
-#   journalctl -f -u sci_update.service
+#   journalctl -f -u gohci_update.service
 
 # All the flags in the following help pages apply:
 # - https://www.freedesktop.org/software/systemd/man/systemd.exec.html
@@ -18,7 +18,7 @@
 # - https://www.freedesktop.org/software/systemd/man/systemd.unit.html
 
 [Unit]
-Description=Updates sci, as triggered by sci_update.timer
+Description=Updates gohci, as triggered by gohci_update.timer
 After=network-online.target
 
 [Service]
@@ -27,7 +27,7 @@ User=pi
 Group=pi
 NoNewPrivileges=true
 # /bin/sh is necessary to load .profile to set $GOPATH:
-ExecStart=/bin/sh -l -c "go get -v -u github.com/maruel/sci"
+ExecStart=/bin/sh -l -c "go get -v -u github.com/maruel/gohci"
 # Set this if you run a custom Go version that is not installed in
 # /usr/local/go:
-# Environment=PATH=/home/pi/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin GOROOT=/home/pi/go
+# Environment=PATH=/home/pi/golang/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin GOROOT=/home/pi/golang GOPATH=/home/pi/go

@@ -2,12 +2,15 @@
 // Use of this source code is governed under the Apache License, Version 2.0
 // that can be found in the LICENSE file.
 
-// sci is a stupid CI.
+// gohci is the Go on Hardware CI.
 //
-// It implements a github webhook webserver that runs a Go build and a list of
-// user supplied commands upon PR or pushes.
+// It is designed to test hardware based Go projects, e.g. testing the commits
+// on Go project on a Rasberry Pi and updating the PR status on GitHub.
 //
-// It posts the stdout to a Github gist and updates the commit's status.
+// It implements:
+// - github webhook webserver that triggers on pushes and PRs
+// - runs a Go build and a list of user supplied commands
+// - posts the stdout to a Github gist and updates the commit's status
 package main
 
 import (
@@ -46,10 +49,10 @@ type config struct {
 	Checks            [][]string // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
 
-func loadConfig() (*config, error) {
+func loadConfig(fileName string) (*config, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
-		hostname = "sci"
+		hostname = "gohci"
 	}
 	c := &config{
 		Port:              8080,
@@ -58,16 +61,16 @@ func loadConfig() (*config, error) {
 		Name:              hostname,
 		Checks:            [][]string{{"go", "test", "./..."}},
 	}
-	b, err := ioutil.ReadFile("sci.json")
+	b, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		b, err = json.MarshalIndent(c, "", "  ")
 		if err != nil {
 			return nil, err
 		}
-		if err = ioutil.WriteFile("sci.json", b, 0600); err != nil {
+		if err = ioutil.WriteFile(fileName, b, 0600); err != nil {
 			return nil, err
 		}
-		return nil, errors.New("wrote new sci.json")
+		return nil, fmt.Errorf("wrote new %s", fileName)
 	}
 	if err = json.Unmarshal(b, c); err != nil {
 		return nil, err
@@ -77,8 +80,8 @@ func loadConfig() (*config, error) {
 		return nil, err
 	}
 	if !bytes.Equal(b, d) {
-		log.Printf("Updating sci.json in canonical format")
-		if err := ioutil.WriteFile("sci.json", d, 0600); err != nil {
+		log.Printf("Updating %s in canonical format", fileName)
+		if err := ioutil.WriteFile(fileName, d, 0600); err != nil {
 			return nil, err
 		}
 	}
@@ -463,12 +466,16 @@ func (s *server) runCheckAsync(repo, commit string, useSSH bool) {
 }
 
 func mainImpl() error {
-	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'maruel/sci'")
-	commit := flag.String("commit", "HEAD", "commit ID to test and update; will only update if not 'HEAD'")
-	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS")
+	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'maruel/gohci'")
+	commit := flag.String("commit", "HEAD", "commit SHA1 to test and update; will only update status on github if not 'HEAD'")
+	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS; only necessary when testing")
 	flag.Parse()
 	log.SetFlags(0)
-	c, err := loadConfig()
+	if *test == "" && *commit != "" {
+		return errors.New("-commit doesn't make sense without -test")
+	}
+	fileName := "gohci.json"
+	c, err := loadConfig(fileName)
 	if err != nil {
 		return err
 	}
@@ -476,7 +483,7 @@ func mainImpl() error {
 	if err != nil {
 		return err
 	}
-	gopath := filepath.Join(wd, "sci-gopath")
+	gopath := filepath.Join(wd, "go")
 	// GOPATH may not be set especially when running from systemd, so use the
 	// local GOPATH to install gt. This is safer as this doesn't modify the host
 	// environment.
@@ -555,7 +562,7 @@ func mainImpl() error {
 	ln.Close()
 	log.Printf("Listening on: %s", a)
 	go http.ListenAndServe(a, nil)
-	err = watchFiles(thisFile, "sci.json")
+	err = watchFiles(thisFile, fileName)
 	// Ensures no task is running.
 	s.wg.Wait()
 	return err
@@ -563,7 +570,7 @@ func mainImpl() error {
 
 func main() {
 	if err := mainImpl(); err != nil {
-		fmt.Fprintf(os.Stderr, "sci: %s.\n", err)
+		fmt.Fprintf(os.Stderr, "gohci: %s.\n", err)
 		os.Exit(1)
 	}
 }

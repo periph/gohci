@@ -1,12 +1,15 @@
-# sci - The Stupid CI
+# gohci - The Go on Hardware CI
 
 ## Genesis
 
 All I wanted was to run `go test ./...` on a Raspberry Pi on both Pull Requests
-and Pushes for a private repository and I realized that I could push the test's
-stdout to a [Github Gist](https://gist.github.com/).
+and Pushes for a private repository. I realized that it is possible to store the
+test's stdout to a [Github Gist](https://gist.github.com/) so I created a
+_serverless_ CI.
 
-The result is the distilled essence of a Continuous Integration service.
+The result is the distilled essence of a Continuous Integration service that is
+heavily towards testing Go projects on hardware, specifically low power ones
+(Raspberry Pis, C.H.I.P., etc).
 
 
 ## Design
@@ -27,11 +30,11 @@ It hardly can get any simpler:
 
 ## Installation
 
-Install and create the default `sci.json`:
+Install and create the default `gohci.json`:
 
 ```
-go get github.com/maruel/sci
-sci
+go get github.com/maruel/gohci
+gohci
 ```
 
 It will look like this:
@@ -53,8 +56,8 @@ It will look like this:
 ```
 
 Edit it based on your needs. Run again and it will start a web server. When
-`sci` is running, updating `sci.json` will make the process quit. It is assumed
-that you use a service manager, like systemd.
+`gohci` is running, updating `gohci.json` will make the process quit. It is
+assumed that you use a service manager, like systemd.
 
 
 ### OAuth2 token
@@ -62,10 +65,11 @@ that you use a service manager, like systemd.
 - Visit https://github.com/settings/tokens
 - Click `Personal access tokens` near the bottom in the left list
 - Click `Generate new token`
-- Add a description like `sci`
-- Check `repo:status` and `gist`
+- Add a description like `gohci`
+- Check `gist` and `repo:status`
+  - Do not give any write access to this token!
 - Click `Generate token`
-- Put the hex string into `AccessToken` in `sci.json`. This is needed to create
+- Put the hex string into `AccessToken` in `gohci.json`. This is needed to create
   the gits and put success/failure status on the Pull Requests.
 
 
@@ -75,7 +79,7 @@ Visit to `github.com/user/repo/settings/hooks` and create a new webhook.
 
 - Use your worker IP address or hostname as the hook URL,
   `https://1.2.3.4/github/repoA`.
-- Type a random string, that you will put in `WebHookSecret` in `sci.json`.
+- Type a random string, that you will put in `WebHookSecret` in `gohci.json`.
 - Click `Let me select individual events` and check: `Commit comment`, `Pull
   request`, `Pull request review comment` and `Push`.
 
@@ -91,16 +95,16 @@ As root:
 ```
 cp systemd/* /etc/systemd/system
 systemctl daemon-reload
-systemctl enable sci.service
-systemctl enable sci_update.timer
-systemctl start sci.service
-systemctl start sci_update.timer
+systemctl enable gohci.service
+systemctl enable gohci_update.timer
+systemctl start gohci.service
+systemctl start gohci_update.timer
 ```
 
 
 ### Testing a private repository
 
-`sci` will automatically switch from HTTPS to SSH checkout when the repository
+`gohci` will automatically switch from HTTPS to SSH checkout when the repository
 is private. For it to work you must:
 - On your device, create a key via `ssh-keygen -C "raspberrypi"` and do not
   specify a password.
@@ -116,11 +120,11 @@ is private. For it to work you must:
 Recompiling will trigger an automatic service restart, so simply run:
 
 ```
-go get -u github.com/maruel/sci
+go get -u github.com/maruel/gohci
 ```
 
-but it is not necessary, as `sci_update.service` does it for you and
-`sci_update.timer` runs sci_update every 10 minutes.
+but it is not necessary, as `gohci_update.service` does it for you and
+`gohci_update.timer` runs gohci_update every 10 minutes.
 
 
 ## Testing locally
@@ -128,11 +132,11 @@ but it is not necessary, as `sci_update.service` does it for you and
 To test your hook, run:
 
 ```
-sci -test maruel/sci
+gohci -test maruel/gohci
 ```
 
-where `maruel/sci` is replaced with the repository you want to fetch and test at
-`HEAD`. Use `-commit` and it'll create the gist and the status on the commit.
+where `maruel/gohci` is replaced with the repository you want to fetch and test
+at `HEAD`. Use `-commit` and it'll create the gist and the status on the commit.
 Useful when testing checks.
 
 The github's "_Redeliver hook_" functionality is also very useful to test your
@@ -141,19 +145,24 @@ setup.
 
 ## Security
 
-This is a remote execution engine so assume the host that is running `sci` will
-be 0wned. That's it. Use a strong webhook secret.
+This is a remote execution engine so assume the host that is running `gohci`
+will be 0wned. That's it. Use a strong webhook secret.
+
+The main problem is someone could steal the OAuth2 token which means the
+attacker can:
+- create gists under your name
+- create or modify commit statuses
 
 
 ## FAQ
 
 
-### Run `sci` for multiple repositories on my device?
+### Run `gohci` for multiple repositories on my device?
 
-- Copy paste `sci.service` multiple times. Don't duplicate `sci_update.service`
-  and `sci_update.timer`, just `sci.service`!
+- Copy paste `gohci.service` multiple times. Don't duplicate
+  `gohci_update.service` and `gohci_update.timer`, just `gohci.service`!
 - Make each one use a *different* `WorkingDirectory=` value.
-- In each directory, create a `sci.json` and use a different `Port`.
+- In each directory, create a `gohci.json` and use a different `Port`.
 - Register and start the services via systemd via `systemctl` commands [listed
   above](#systemd).
 - Your `Caddyfile` file should look like the following. You can also run Caddy
@@ -176,15 +185,16 @@ I think you are missing the point. That said, forking this code and updating
 `runChecks()` accordingly would do just fine.
 
 
-### Can you add support for `gd`, etc?
+### Can you add support for `gd`, `glide`, etc?
 
-I think you are missing the point. That said, forking this code and updating
-`runChecks()` accordingly would do just fine.
+The project's goal is to be very simple. Forking this code and updating
+`runChecks()` accordingly would do just fine. That said, if there's enough
+interest, I'm open to adding more suppotr.
 
 
 ### Test on multiple kind of hardware simultaneously?
 
-- Install `sci` on each of your devices, e.g. a
+- Install `gohci` on each of your devices, e.g. a
   [C.H.I.P.](https://getchip.com/), a [Raspberry
   Pi](https://www.raspberrypi.org/), a [Pine64](https://www.pine64.org/), etc.
 - Register multiple webhooks to your repository, one per device, using the
@@ -206,22 +216,22 @@ ci.example.com {
 
 ### Won't the auto-updater break my CI when you push broken code?
 
-Yes. I'll try to keep `sci` always in a working condition but it can fail from
-time to time. So feel free to fork the `sci` repository and run from your copy.
-Don't forget to update `sci_update.timer` to pull from your repository instead.
-It'll work just fine.
+Yes. I'll try to keep `gohci` always in a working condition but it can fail from
+time to time. So feel free to fork the `gohci` repository and run from your
+copy.  Don't forget to update `gohci_update.timer` to pull from your repository
+instead.  It'll work just fine.
 
 
-### `sci` doesn't have unit tests. Isn't that stupid?
+### Why `gohci` doesn't have unit tests?
 
-I think you are missing the point.
+Because I like ironic projects.
 
 
-### What's the max testing rate per hour?
+### What's the maximum testing rate per hour?
 
 Github enforces [5000 requests per
 hour](https://developer.github.com/v3/#rate-limiting) for authenticated
 requests. Each test run does 3 create status requests, 1 gist create request
 including the 'metadata' stream then one gist edit request per additional
 stream, including the two 'setup' streams. So a configuration defining 7 tests
-would sum for 3+1+2+7=13 requests. 5000/13 = 384 tests run/hour.
+would sum for 3+1+2+7=13 requests. 5000/13 = *384 tests run/hour*.

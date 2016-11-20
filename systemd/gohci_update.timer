@@ -3,17 +3,17 @@
 # that can be found in the LICENSE file.
 
 # To install, run as root:
-#   cp sci_update.service /etc/systemd/system
+#   cp gohci_update.service /etc/systemd/system
 #   systemctl daemon-reload
-#   systemctl enable sci_update.timer
-#   systemctl start sci_update.timer
+#   systemctl enable gohci_update.timer
+#   systemctl start gohci_update.timer
 
 # All the flags in the following help pages apply:
 # - https://www.freedesktop.org/software/systemd/man/systemd.timer.html
 # - https://www.freedesktop.org/software/systemd/man/systemd.unit.html
 
 [Unit]
-Description=Runs "go get -u github.com/maruel/sci" as a cron job
+Description=Runs "go get -u github.com/maruel/gohci" as a cron job
 
 [Timer]
 OnBootSec=1min
