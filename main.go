@@ -420,11 +420,11 @@ func (s *server) runCheck(repo, commit string, useSSH bool) error {
 				suffix += " (failed)"
 			}
 			gist.Description = github.String(desc + suffix + " in " + roundTime(time.Since(start)).String())
-			if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
+			if gist, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
 				// Just move on.
-				log.Printf("- failed to update gist %v", err)
+				log.Printf("- failed to update gist: %v", err)
 			} else {
-				log.Printf("- gists updated with %s", name)
+				log.Printf("- gists updated with: %s", name)
 			}
 			i++
 		}
