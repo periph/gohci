@@ -231,7 +231,25 @@ Because I like ironic projects.
 
 Github enforces [5000 requests per
 hour](https://developer.github.com/v3/#rate-limiting) for authenticated
-requests. Each test run does 3 create status requests, 1 gist create request
-including the 'metadata' stream then one gist edit request per additional
-stream, including the two 'setup' streams. So a configuration defining 7 tests
-would sum for 3+1+2+7=13 requests. 5000/13 = *384 tests run/hour*.
+requests. Each test run does:
+
+- 1 create status request for pending
+- 1 create status request at the start
+- 1 gist create request including the 'metadata' pseudo-file
+- For each stream (one stream per test plus the two 'setup' streams):
+  - 1 gist edit request
+  - 1 status create request
+
+So a configuration defining 7 tests would sum for `3 + 1 + (2 * (7+2))` = 22
+requests. 5000/13 = *227 test runs/hour*. If you have 3 workers, this means an
+upper bound of *75 test runs/hour*.
+
+If this becomes a problem, the number of requests can be lowered up to:
+
+- 1 create status request for pending
+- 1 create status request at the start
+- 1 create status request at the end
+- 1 gists create request at the end
+
+at the cost of having no updates while the task is running. This would enable
+1250 test runs/hour.

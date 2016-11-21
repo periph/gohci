@@ -365,7 +365,7 @@ func (s *server) runCheckAsync(repo, commit string, useSSH bool) {
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
 		State:       github.String("failure"),
-		Description: github.String("Tests pending"),
+		Description: github.String(fmt.Sprintf("Tests pending (0/%d)", len(s.c.Checks)+2)),
 		Context:     &s.c.Name,
 	}
 	parts := strings.SplitN(repo, "/", 2)
@@ -374,95 +374,98 @@ func (s *server) runCheckAsync(repo, commit string, useSSH bool) {
 		log.Printf("- Failed to create status: %v", err)
 		return
 	}
-
 	// Enqueue and run.
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		log.Printf("- Running test for %s at %s", repo, commit)
-		// https://developer.github.com/v3/gists/#create-a-gist
-		// It is still accessible via the URL without authentication.
-		desc := fmt.Sprintf("%s for https://github.com/%s/commit/%s", s.c.Name, repo, commit[:12])
-		total := len(s.c.Checks) + 2
-		gist := &github.Gist{
-			Description: github.String(desc + fmt.Sprintf(" (0/%d)", total)),
-			Public:      github.Bool(false),
-			Files: map[github.GistFilename]github.GistFile{
-				"setup-0-metadata": github.GistFile{Content: github.String(metadata(commit, s.gopath) + "\nCommands to be run:\n" + s.cmds)},
-			},
-		}
-		gist, _, err := s.client.Gists.Create(gist)
-		if err != nil {
-			// Don't bother running the tests.
-			log.Printf("- Failed to create gist: %v", err)
-			return
-		}
-		log.Printf("- Gist at %s", *gist.HTMLURL)
+		s.runCheckSync(repo, commit, useSSH, status)
+	}()
+}
 
-		status.TargetURL = gist.HTMLURL
-		status.Description = github.String("Running tests")
-		if _, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status); err != nil {
-			log.Printf("- Failed to update status: %v", err)
-			return
-		}
+func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.RepoStatus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	log.Printf("- Running test for %s at %s", repo, commit)
+	total := len(s.c.Checks) + 2
+	suffix := fmt.Sprintf(" (0/%d)", total)
+	// https://developer.github.com/v3/gists/#create-a-gist
+	// It is still accessible via the URL without authentication.
+	gistDesc := fmt.Sprintf("%s for https://github.com/%s/commit/%s", s.c.Name, repo, commit[:12])
+	gist := &github.Gist{
+		Description: github.String(gistDesc + suffix),
+		Public:      github.Bool(false),
+		Files: map[github.GistFilename]github.GistFile{
+			"setup-0-metadata": github.GistFile{Content: github.String(metadata(commit, s.gopath) + "\nCommands to be run:\n" + s.cmds)},
+		},
+	}
+	gist, _, err := s.client.Gists.Create(gist)
+	if err != nil {
+		// Don't bother running the tests.
+		log.Printf("- Failed to create gist: %v", err)
+		return
+	}
+	log.Printf("- Gist at %s", *gist.HTMLURL)
 
-		start := time.Now()
-		results := make(chan file)
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			i := 1
-			failed := false
-			for r := range results {
-				// https://developer.github.com/v3/gists/#edit-a-gist
-				if len(r.content) == 0 {
-					r.content = "<missing>"
-				}
-				if !r.success {
-					r.name += " (failed)"
-					failed = true
-				}
-				name := r.name + " in " + roundTime(r.d).String()
-				gist.Files = map[github.GistFilename]github.GistFile{github.GistFilename(name): github.GistFile{Content: &r.content}}
+	statusDesc := "Running tests"
+	status.TargetURL = gist.HTMLURL
+	status.Description = github.String(statusDesc + suffix)
+	parts := strings.SplitN(repo, "/", 2)
+	if _, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status); err != nil {
+		log.Printf("- Failed to update status: %v", err)
+		return
+	}
 
-				suffix := ""
-				if i != total {
-					suffix = fmt.Sprintf(" (%d/%d)", i, total)
-				} else if !failed {
-					suffix += " (success!)"
-				}
-				if failed {
-					suffix += " (failed)"
-				}
-				gist.Description = github.String(desc + suffix + " in " + roundTime(time.Since(start)).String())
-				if gist, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
-					// Just move on.
-					log.Printf("- failed to update gist: %v", err)
-				} else {
-					log.Printf("- gists updated with: %s", name)
-				}
-				i++
-				gist.Files = nil
-			}
-		}()
-		success := runChecks(s.c.Checks, repo, useSSH, commit, s.gopath, results)
+	start := time.Now()
+	results := make(chan file)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		runChecks(s.c.Checks, repo, useSSH, commit, s.gopath, results)
 		close(results)
-		wg.Wait()
-
-		if success {
-			status.State = github.String("success")
+	}()
+	i := 1
+	failed := false
+	for r := range results {
+		// https://developer.github.com/v3/gists/#edit-a-gist
+		if len(r.content) == 0 {
+			r.content = "<missing>"
 		}
-		status.Description = github.String("Ran tests")
+		if !r.success {
+			r.name += " (failed)"
+			failed = true
+		}
+		r.name += " in " + roundTime(r.d).String()
+		gist.Files = map[github.GistFilename]github.GistFile{github.GistFilename(r.name): github.GistFile{Content: &r.content}}
+		suffix = ""
+		if i != total {
+			suffix = fmt.Sprintf(" (%d/%d)", i, total)
+		} else {
+			statusDesc = "Ran tests"
+			if !failed {
+				suffix += " (success!)"
+				status.State = github.String("success")
+			}
+		}
+		if failed {
+			suffix += " (failed)"
+		}
+		suffix += " in " + roundTime(time.Since(start)).String()
+		gist.Description = github.String(gistDesc + suffix)
+		if gist, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
+			// Just move on.
+			log.Printf("- failed to update gist: %v", err)
+		}
+		gist.Files = nil
+		status.Description = github.String(statusDesc + suffix)
 		if _, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status); err != nil {
+			// Just move on.
 			log.Printf("- failed to update status: %v", err)
 		}
-		// TODO(maruel): If running on a push to refs/heads/master and it failed,
-		// call s.client.Issues.Create().
-		log.Printf("- testing done: https://github.com/%s/commit/%s", repo, commit[:12])
-	}()
+		i++
+	}
+	// TODO(maruel): If running on a push to refs/heads/master and it failed,
+	// call s.client.Issues.Create().
+	log.Printf("- testing done: https://github.com/%s/commit/%s", repo, commit[:12])
 }
 
 func mainImpl() error {
