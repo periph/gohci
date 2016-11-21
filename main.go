@@ -163,11 +163,7 @@ func cloneOrFetch(repoPath, cloneURL string) (string, bool) {
 	} else if !os.IsNotExist(err) {
 		return "<failure>\n" + err.Error() + "\n", false
 	}
-	up := path.Dir(repoPath)
-	if err := os.MkdirAll(up, 0700); err != nil {
-		return "<failure>\n" + err.Error() + "\n", false
-	}
-	return run(up, "git", "clone", "--quiet", cloneURL)
+	return run(path.Dir(repoPath), "git", "clone", "--quiet", cloneURL)
 }
 
 func fetch(repoPath string) (string, bool) {
@@ -195,6 +191,12 @@ func fetch(repoPath string) (string, bool) {
 func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 	// relRepo is handled differently than the other.
 	repoPath := filepath.Join(root, relRepo)
+	// git clone / go get will have a race condition if the directory doesn't
+	// exist.
+	if err := os.MkdirAll(path.Dir(repoPath), 0700); err != nil && !os.IsExist(err) {
+		c <- item{"<failure>\n" + err.Error() + "\n", false}
+		return
+	}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
