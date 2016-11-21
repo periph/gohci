@@ -470,12 +470,19 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 
 func mainImpl() error {
 	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'maruel/gohci'")
-	commit := flag.String("commit", "HEAD", "commit SHA1 to test and update; will only update status on github if not 'HEAD'")
+	commit := flag.String("commit", "", "commit SHA1 to test and update; will only update status on github if not 'HEAD'")
 	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS; only necessary when testing")
 	flag.Parse()
 	log.SetFlags(0)
-	if *test == "" && *commit != "" {
-		return errors.New("-commit doesn't make sense without -test")
+	if *test == "" {
+		if *commit != "" {
+			return errors.New("-commit doesn't make sense without -test")
+		}
+		if *useSSH {
+			return errors.New("-usessh doesn't make sense without -test")
+		}
+	} else if *commit == "" {
+		*commit = "HEAD"
 	}
 	fileName := "gohci.json"
 	c, err := loadConfig(fileName)
