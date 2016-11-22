@@ -81,8 +81,8 @@ assumed that you use a service manager, like systemd.
 - Check `gist` and `repo:status`
   - Do not give any write access to this token!
 - Click `Generate token`
-- Put the hex string into `AccessToken` in `gohci.json`. This is needed to create
-  the gits and put success/failure status on the Pull Requests.
+- Put the hex string into `AccessToken` in `gohci.json`. This is needed to
+  create the gists and put success/failure status on the Pull Requests.
 
 
 ### Webhook
@@ -171,6 +171,11 @@ attacker can:
 
 ### Run `gohci` for multiple repositories on my device?
 
+You have two choices: either one instance runs tests for both repositories or
+you run two separate processes.
+
+To run multiple instances:
+
 - Copy paste `gohci.service` multiple times. Don't duplicate
   `gohci_update.service` and `gohci_update.timer`, just `gohci.service`!
 - Make each one use a *different* `WorkingDirectory=` value.
@@ -189,19 +194,6 @@ ci.example.com {
     proxy /github/repoB raspberry:8081
 }
 ```
-
-
-### Can you add support for node.js, ruby, C++, etc?
-
-I think you are missing the point. That said, forking this code and updating
-`runChecks()` accordingly would do just fine.
-
-
-### Can you add support for `gd`, `glide`, etc?
-
-The project's goal is to be very simple. Forking this code and updating
-`runChecks()` accordingly would do just fine. That said, if there's enough
-interest, I'm open to adding more suppotr.
 
 
 ### Test on multiple kind of hardware simultaneously?
@@ -231,7 +223,7 @@ ci.example.com {
 Yes. I'll try to keep `gohci` always in a working condition but it can fail from
 time to time. So feel free to fork the `gohci` repository and run from your
 copy.  Don't forget to update `gohci_update.timer` to pull from your repository
-instead.  It'll work just fine.
+instead.
 
 
 ### Why `gohci` doesn't have unit tests?
@@ -241,7 +233,7 @@ Because I like ironic projects.
 
 ### What's the maximum testing rate per hour?
 
-Github enforces [5000 requests per
+Github has a free quota of [5000 requests per
 hour](https://developer.github.com/v3/#rate-limiting) for authenticated
 requests. Each test run does:
 
@@ -265,3 +257,16 @@ If this becomes a problem, the number of requests can be lowered up to:
 
 at the cost of having no updates while the task is running. This would enable
 1250 test runs/hour.
+
+
+### Can you add support for node.js, ruby, C++, etc?
+
+I think you are missing the point. That said, forking this code and updating
+`runChecks()` accordingly would do just fine.
+
+
+### Can you add support for `gd`, `glide`, etc?
+
+The project's goal is to be very simple. Forking this code and updating
+`runChecks()` accordingly would do just fine. That said, if there's enough
+interest, I'm open to adding more support.
