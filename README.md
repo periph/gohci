@@ -19,13 +19,22 @@ It hardly can get any simpler:
 - Only support one specific use case: *Golang project hosted on Github*.
 - There is no server, the worker must be internet accessible and HTTPS must be
   proxied down to HTTP.
-  - [Caddy](https://caddyserver.com/) works great along it's native
+  - [Caddy](https://caddyserver.com/) works great along its native
     [letsencrypt.org](https://letsencrypt.org) support.
-- Each check's stdout is "_streamed_" to the gist as they complete.
 - The worker has a configuration file that determines what command it runs to
   test the project.
   - By default it is `go test ./...`. There's no configuration file in the
     repository itself.
+
+
+## Features
+
+- Each check's stdout is "_streamed_" to the gist as they complete.
+- The commit's status is updated "_live_" on Github. This is pretty cool to see
+  in action on a github PR.
+- Trivial to run as a low maintenance systemd service.
+- Designed to work great on a single core ARM CPU with minimal memory
+  requirements.
 
 
 ## Installation
