@@ -1,5 +1,8 @@
 # gohci - The Go on Hardware CI
 
+![screen cast](https://raw.githubusercontent.com/wiki/maruel/gohci/gohci.gif
+"screen cast")
+
 ## Genesis
 
 All I wanted was to run `go test ./...` on a Raspberry Pi on both Pull Requests
