@@ -338,17 +338,29 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else if *event.Repo.FullName != *event.PullRequest.Head.Repo.FullName {
 				log.Printf("- ignoring PR from forked repo %q", *event.PullRequest.Head.Repo.FullName)
 			} else {
-				s.runCheckAsync(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private)
+				s.runCheckAsync(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private, nil)
 			}
 		case *github.PushEvent:
 			if event.HeadCommit == nil {
 				log.Printf("- Push %s %s <deleted>", *event.Repo.FullName, *event.Ref)
 			} else {
 				log.Printf("- Push %s %s %s", *event.Repo.FullName, *event.Ref, *event.HeadCommit.ID)
-				if !strings.HasPrefix(*event.Ref, "refs/heads/master") {
+				if !strings.HasPrefix(*event.Ref, "refs/heads/") {
 					log.Printf("- ignoring branch %q for push", *event.Ref)
 				} else {
-					s.runCheckAsync(*event.Repo.FullName, *event.HeadCommit.ID, *event.Repo.Private)
+					// Automatically create an issue only when a failure happens on
+					// branch "master".
+					var blame []string
+					if *event.Ref == "refs/heads/master" {
+						author := *event.HeadCommit.Author.Login
+						committer := *event.HeadCommit.Committer.Login
+						if author != committer {
+							blame = []string{author, committer}
+						} else {
+							blame = []string{author}
+						}
+					}
+					s.runCheckAsync(*event.Repo.FullName, *event.HeadCommit.ID, *event.Repo.Private, blame)
 				}
 			}
 		default:
@@ -360,7 +372,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Immediately add the status that the test run is pending and add the run in
 // the queue. Ensures that the service doesn't restart until the task is done.
-func (s *server) runCheckAsync(repo, commit string, useSSH bool) {
+func (s *server) runCheckAsync(repo, commit string, useSSH bool, blame []string) {
 	s.wg.Add(1)
 	defer s.wg.Done()
 	log.Printf("- Enqueuing test for %s at %s", repo, commit)
@@ -380,11 +392,20 @@ func (s *server) runCheckAsync(repo, commit string, useSSH bool) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.runCheckSync(repo, commit, useSSH, status)
+		s.runCheckSync(repo, commit, useSSH, status, blame)
 	}()
 }
 
-func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.RepoStatus) {
+// runCheckSync runs the check for the repository "repo" hosted on github at
+// commit "commit".
+//
+// It will use the ssh protocol if "useSSH" is set, https otherwise.
+// "status" is the github status to keep updating as progress is made.
+// If "blame" is not empty, an issue is created on failure. This must be a list
+// of github handles. These strings are different from what appears in the git
+// commit log. Non-team members cannot be assigned an issue, in this case the
+// API will silently drop them.
+func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.RepoStatus, blame []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	log.Printf("- Running test for %s at %s", repo, commit)
@@ -465,8 +486,20 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 		}
 		i++
 	}
-	// TODO(maruel): If running on a push to refs/heads/master and it failed,
-	// call s.client.Issues.Create().
+	if len(blame) != 0 {
+		// https://developer.github.com/v3/issues/#create-an-issue
+		issue := github.IssueRequest{
+			Title: github.String(fmt.Sprintf("Build %q failed on %s", s.c.Name, commit)),
+			// TODO(maruel): Add more than just the URL but that's a start.
+			Body:      gist.HTMLURL,
+			Assignees: &blame,
+		}
+		if issue, _, err := s.client.Issues.Create(parts[0], parts[1], &issue); err != nil {
+			log.Printf("- failed to create issue: %v", err)
+		} else {
+			log.Printf("- created issue #%d", *issue.ID)
+		}
+	}
 	log.Printf("- testing done: https://github.com/%s/commit/%s", repo, commit[:12])
 }
 
@@ -554,7 +587,7 @@ func mainImpl() error {
 			_, err := fmt.Printf("\nSuccess: %t\n", success)
 			return err
 		}
-		s.runCheckAsync(*test, *commit, *useSSH)
+		s.runCheckAsync(*test, *commit, *useSSH, nil)
 		s.wg.Wait()
 		// TODO(maruel): Return any error that occured.
 		return nil
