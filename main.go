@@ -46,6 +46,7 @@ type config struct {
 	WebHookSecret     string     // https://developer.github.com/webhooks/
 	Oauth2AccessToken string     // https://github.com/settings/tokens, check "repo:status" and "gist"
 	Name              string     // Display name to use in the status report on Github.
+	AcceptStrangers   bool       // Runs PRs coming from a fork. This means your worker will run uncontrolled code.
 	Checks            [][]string // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
 
@@ -335,7 +336,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.ID, *event.Sender.Login, *event.Action)
 			if *event.Action != "opened" && *event.Action != "synchronized" {
 				log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
-			} else if *event.Repo.FullName != *event.PullRequest.Head.Repo.FullName {
+			} else if !s.c.AcceptStrangers && *event.Repo.FullName != *event.PullRequest.Head.Repo.FullName {
 				log.Printf("- ignoring PR from forked repo %q", *event.PullRequest.Head.Repo.FullName)
 			} else {
 				s.runCheckAsync(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private, nil)
@@ -348,8 +349,6 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if !strings.HasPrefix(*event.Ref, "refs/heads/") {
 					log.Printf("- ignoring branch %q for push", *event.Ref)
 				} else {
-					// Automatically create an issue only when a failure happens on
-					// branch "master".
 					var blame []string
 					if *event.Ref == "refs/heads/master" {
 						author := *event.HeadCommit.Author.Login

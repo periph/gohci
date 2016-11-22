@@ -57,6 +57,7 @@ It will look like this:
   "WebHookSecret": "Create a secret and set it at github.com/user/repo/settings/hooks",
   "Oauth2AccessToken": "Get one at https://github.com/settings/tokens",
   "Name": "<the hostname by default>",
+  "AcceptStrangers": false,
   "Checks": [
     [
       "go",
@@ -218,11 +219,22 @@ ci.example.com {
 ```
 
 
+### What are the rules about which PRs are tested?
+
+By default, `AcceptStrangers` is `false`, which means that PRs that do come from
+a forked repository are not tested automatically. If `AcceptStrangers` is set to
+`true`, all PRs are tested. This increase your attack surface as your worker
+litterally run random code. This is not recommended.
+
+The default rule is that only PRs coming from the own repo (not a fork) will be
+automatically tested, plus any push to the repository.
+
+
 ### Won't the auto-updater break my CI when you push broken code?
 
 Yes. I'll try to keep `gohci` always in a working condition but it can fail from
 time to time. So feel free to fork the `gohci` repository and run from your
-copy.  Don't forget to update `gohci_update.timer` to pull from your repository
+copy. Don't forget to update `gohci_update.timer` to pull from your repository
 instead.
 
 
