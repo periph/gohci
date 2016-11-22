@@ -10,9 +10,9 @@ and Pushes for a private repository. I realized that it is possible to store the
 test's stdout to a [Github Gist](https://gist.github.com/) so I created a
 _serverless_ CI.
 
-The result is the distilled essence of a Continuous Integration service that is
-heavily towards testing Go projects on hardware, specifically low power ones
-(Raspberry Pis, C.H.I.P., etc).
+The result is the distilled essence of a Continuous Integration service that
+leans heavily toward testing Go projects on hardware, specifically low power
+ones (Raspberry Pis, C.H.I.P., etc).
 
 
 ## Design
