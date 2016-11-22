@@ -335,7 +335,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.ID, *event.Sender.Login, *event.Action)
 			if *event.Action != "opened" && *event.Action != "synchronized" {
 				log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
-			} else if *event.Repo.FullName == *event.PullRequest.Head.Repo.FullName {
+			} else if *event.Repo.FullName != *event.PullRequest.Head.Repo.FullName {
 				log.Printf("- ignoring PR from forked repo %q", *event.PullRequest.Head.Repo.FullName)
 			} else {
 				s.runCheckAsync(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private)
@@ -345,7 +345,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				log.Printf("- Push %s %s <deleted>", *event.Repo.FullName, *event.Ref)
 			} else {
 				log.Printf("- Push %s %s %s", *event.Repo.FullName, *event.Ref, *event.HeadCommit.ID)
-				if !strings.HasPrefix(*event.Ref, "refs/heads/") {
+				if !strings.HasPrefix(*event.Ref, "refs/heads/master") {
 					log.Printf("- ignoring branch %q for push", *event.Ref)
 				} else {
 					s.runCheckAsync(*event.Repo.FullName, *event.HeadCommit.ID, *event.Repo.Private)
