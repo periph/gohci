@@ -486,6 +486,11 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 		}
 		i++
 	}
+	// This requires OAuth scope 'public_repo' or 'repo'. The problem is that
+	// this gives full write access, not just issue creation and this is
+	// problematic with the current security design of this project. Leave the
+	// code there as this is harmless and still work is people do not care about
+	// security.
 	if len(blame) != 0 {
 		// https://developer.github.com/v3/issues/#create-an-issue
 		issue := github.IssueRequest{
@@ -619,5 +624,3 @@ func main() {
 		os.Exit(1)
 	}
 }
-
-broken
