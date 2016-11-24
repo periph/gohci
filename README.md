@@ -57,7 +57,7 @@ It will look like this:
   "WebHookSecret": "Create a secret and set it at github.com/user/repo/settings/hooks",
   "Oauth2AccessToken": "Get one at https://github.com/settings/tokens",
   "Name": "<the hostname by default>",
-  "AcceptStrangers": false,
+  "RunForPRsFromFork": false,
   "Checks": [
     [
       "go",
@@ -114,8 +114,24 @@ systemctl start gohci.service
 systemctl start gohci_update.timer
 ```
 
+### Windows
 
-### Testing a private repository
+
+You can create a shortcut `gohci.lnk` that points to your `gohci.exe`; set the
+working directoy accordingly, then copy the shortcut to
+`%APPDATA\Microsoft\Windows\Start Menu\Programs\Startup`.
+
+Auto-update can be done via the task scheduler:
+
+```
+schtasks /create /tn "Update gohci" /tr "go get -u github.com/maruel/gohci" /sc minute /mo 10
+```
+
+The task should show up with: `schtasks /query /fo table | more` or navigating
+the GUI with `taskschd.msc`.
+
+
+## Testing a private repository
 
 `gohci` will automatically switch from HTTPS to SSH checkout when the repository
 is private. For it to work you must:
@@ -221,10 +237,10 @@ ci.example.com {
 
 ### What are the rules about which PRs are tested?
 
-By default, `AcceptStrangers` is `false`, which means that PRs that do come from
-a forked repository are not tested automatically. If `AcceptStrangers` is set to
-`true`, all PRs are tested. This increase your attack surface as your worker
-litterally run random code. This is not recommended.
+By default, `RunForPRsFromFork` is `false`, which means that PRs that do come
+from a forked repository are not tested automatically. If `RunForPRsFromFork` is
+set to `true`, all PRs are tested. This increase your attack surface as your
+worker litterally run random code. This is not recommended.
 
 The default rule is that only PRs coming from the own repo (not a fork) will be
 automatically tested, plus any push to the repository.

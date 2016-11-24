@@ -46,10 +46,14 @@ type config struct {
 	WebHookSecret     string     // https://developer.github.com/webhooks/
 	Oauth2AccessToken string     // https://github.com/settings/tokens, check "repo:status" and "gist"
 	Name              string     // Display name to use in the status report on Github.
-	AcceptStrangers   bool       // Runs PRs coming from a fork. This means your worker will run uncontrolled code.
+	RunForPRsFromFork bool       // Runs PRs coming from a fork. This means your worker will run uncontrolled code.
+	SuperUsers        []string   // List of github accounts that can trigger a run. In practice any user with write access is a super user but OAuth2 tokens with limited scopes cannot get this information.
 	Checks            [][]string // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
 
+// loadConfig loads the current config or returns the default one.
+//
+// It saves a reformatted version on disk if it was not in the canonical format.
 func loadConfig(fileName string) (*config, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -60,6 +64,8 @@ func loadConfig(fileName string) (*config, error) {
 		WebHookSecret:     "Create a secret and set it at github.com/user/repo/settings/hooks",
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
 		Name:              hostname,
+		RunForPRsFromFork: false,
+		SuperUsers:        []string{},
 		Checks:            [][]string{{"go", "test", "./..."}},
 	}
 	b, err := ioutil.ReadFile(fileName)
@@ -104,6 +110,8 @@ func normalizeUTF8(b []byte) []byte {
 	return out
 }
 
+// roundTime returns time rounded at a value that makes sense to display to the
+// user.
 func roundTime(t time.Duration) time.Duration {
 	if t < time.Millisecond {
 		// Precise at 1ns.
@@ -117,6 +125,7 @@ func roundTime(t time.Duration) time.Duration {
 	return (t + time.Millisecond/2) / time.Millisecond * time.Millisecond
 }
 
+// run runs an executable and returns mangled merged stdout+stderr.
 func run(cwd string, cmd ...string) (string, bool) {
 	cmds := strings.Join(cmd, " ")
 	log.Printf("- cwd=%s : %s", cwd, cmds)
@@ -147,6 +156,7 @@ type file struct {
 	d             time.Duration
 }
 
+// metadata generates the pseudo-file to present information about the worker.
 func metadata(commit, gopath string) string {
 	return fmt.Sprintf(
 		"Commit:  %s\nCPUs:    %d\nVersion: %s\nGOROOT:  %s\nGOPATH:  %s\nPATH:    %s",
@@ -158,6 +168,8 @@ type item struct {
 	ok      bool
 }
 
+// cloneOrFetch is meant to be used on the primary repository, making sure it
+// is checked out.
 func cloneOrFetch(repoPath, cloneURL string) (string, bool) {
 	if _, err := os.Stat(repoPath); err == nil {
 		return run(repoPath, "git", "fetch", "--prune", "--quiet")
@@ -167,7 +179,9 @@ func cloneOrFetch(repoPath, cloneURL string) (string, bool) {
 	return run(path.Dir(repoPath), "git", "clone", "--quiet", cloneURL)
 }
 
-func fetch(repoPath string) (string, bool) {
+// pullRepo tries to pull a repository if possible. If the pull failed, it
+// deletes the checkout.
+func pullRepo(repoPath string) (string, bool) {
 	stdout, ok := run(repoPath, "git", "pull", "--prune", "--quiet")
 	if !ok {
 		// Give up and delete the repository. At worst "go get" will fetch
@@ -219,7 +233,7 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 			wg.Add(1)
 			go func(p string) {
 				defer wg.Done()
-				stdout, ok := fetch(p)
+				stdout, ok := pullRepo(p)
 				c <- item{stdout, ok}
 			}(path)
 			return filepath.SkipDir
@@ -295,6 +309,7 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 	return ok
 }
 
+// server is both the HTTP server and the task queue server.
 type server struct {
 	c      *config
 	client *github.Client
@@ -304,6 +319,23 @@ type server struct {
 	wg     sync.WaitGroup // Set for each pending task.
 }
 
+// isSuperUser returns true if the user can trigger tasks.
+func (s *server) isSuperUser(u string) bool {
+	for _, c := range s.c.SuperUsers {
+		if c == u {
+			return true
+		}
+	}
+	// s.client.Repositories.IsCollaborator() requires *write* access to the
+	// repository, which we really do not want here. So don't even try for now.
+	return false
+}
+
+// ServeHTTP handles all HTTP requests and triggers a task if relevant.
+//
+// While the task is started asynchronously, a synchronous status update is
+// done so the user is immediately alerted that the task is pending on the
+// host. Only one task runs at a time.
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("HTTP: %s %s", r.RemoteAddr, r.URL.Path)
 	defer r.Body.Close()
@@ -327,25 +359,37 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// Process the rest asynchronously so the hook doesn't take too long.
 		switch event := event.(type) {
-		// TODO(maruel): For *github.CommitCommentEvent and
-		// *github.IssueCommentEvent, when the comment is 'run tests' from a
-		// collaborator, run the tests.
+		case *github.CommitCommentEvent:
+			// https://developer.github.com/v3/activity/events/types/#commitcommentevent
+			if s.isSuperUser(*event.Sender.Login) && strings.HasPrefix(*event.Comment.Body, "gohci:") {
+				s.runCheckAsync(*event.Repo.FullName, *event.Comment.CommitID, *event.Repo.Private, nil)
+			}
+
+		case *github.IssueCommentEvent:
+			// We'd need the PR's commit head but it is not in the webhook payload.
+			// This means we'd require read access to the issues, which the OAuth
+			// token shouldn't have. This is because there is no read access to the
+			// issue without write access.
+			log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
+
 		case *github.PullRequestEvent:
-			// s.client.Repositories.IsCollaborator() requires *write* access to the
-			// repository, which we really do not want here.
 			log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.ID, *event.Sender.Login, *event.Action)
 			if *event.Action != "opened" && *event.Action != "synchronized" {
 				log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
-			} else if !s.c.AcceptStrangers && *event.Repo.FullName != *event.PullRequest.Head.Repo.FullName {
+			} else if (!s.c.RunForPRsFromFork && *event.Repo.FullName != *event.PullRequest.Head.Repo.FullName) && !s.isSuperUser(*event.Sender.Login) {
+				// A PR from a fork and these are not allowed AND not a super user.
 				log.Printf("- ignoring PR from forked repo %q", *event.PullRequest.Head.Repo.FullName)
 			} else {
 				s.runCheckAsync(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private, nil)
 			}
+
 		case *github.PushEvent:
 			if event.HeadCommit == nil {
 				log.Printf("- Push %s %s <deleted>", *event.Repo.FullName, *event.Ref)
 			} else {
 				log.Printf("- Push %s %s %s", *event.Repo.FullName, *event.Ref, *event.HeadCommit.ID)
+				// TODO(maruel): Potentially leverage event.Repo.DefaultBranch or
+				// event.Repo.MasterBranch?
 				if !strings.HasPrefix(*event.Ref, "refs/heads/") {
 					log.Printf("- ignoring branch %q for push", *event.Ref)
 				} else {
@@ -369,8 +413,9 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "{}")
 }
 
-// Immediately add the status that the test run is pending and add the run in
-// the queue. Ensures that the service doesn't restart until the task is done.
+// runCheckAsync immediately add the status that the test run is pending and
+// add the run in the queue. Ensures that the service doesn't restart until the
+// task is done.
 func (s *server) runCheckAsync(repo, commit string, useSSH bool, blame []string) {
 	s.wg.Add(1)
 	defer s.wg.Done()
