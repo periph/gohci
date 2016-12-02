@@ -35,6 +35,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	fsnotify "gopkg.in/fsnotify.v1"
+
 	"github.com/bugsnag/osext"
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
@@ -99,7 +101,7 @@ func normalizeUTF8(b []byte) []byte {
 		return b
 	}
 	var out []byte
-	for {
+	for len(b) != 0 {
 		r, size := utf8.DecodeRune(b)
 		if r != utf8.RuneError {
 			out = append(out, b[:size]...)
@@ -663,7 +665,25 @@ func mainImpl() error {
 	ln.Close()
 	log.Printf("Listening on: %s", a)
 	go http.ListenAndServe(a, nil)
-	err = watchFiles(thisFile, fileName)
+
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Printf("Failed to initialize watcher: %v", err)
+	} else if err = w.Add(thisFile); err != nil {
+		log.Printf("Failed to initialize watcher: %v", err)
+	} else if err = w.Add(fileName); err != nil {
+		log.Printf("Failed to initialize watcher: %v", err)
+	}
+	if err == nil {
+		select {
+		case <-w.Events:
+		case err = <-w.Errors:
+			log.Printf("Waiting failure: %v", err)
+		}
+	} else {
+		// Hang so the server actually run.
+		select {}
+	}
 	// Ensures no task is running.
 	s.wg.Wait()
 	return err
