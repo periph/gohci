@@ -587,7 +587,7 @@ func mainImpl() error {
 	// local GOPATH to install gt. This is safer as this doesn't modify the host
 	// environment.
 	os.Setenv("GOPATH", gopath)
-	os.Setenv("PATH", filepath.Join(gopath, "bin")+":"+os.Getenv("PATH"))
+	os.Setenv("PATH", filepath.Join(gopath, "bin")+os.PathListSeparator+os.Getenv("PATH"))
 	hasTest := false
 	for _, cmd := range c.Checks {
 		if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
