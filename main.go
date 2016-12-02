@@ -204,7 +204,7 @@ func pullRepo(repoPath string) (string, bool) {
 // are already synced to HEAD.
 func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 	// relRepo is handled differently than the other.
-	repoPath := filepath.Join(root, relRepo)
+	repoPath := filepath.Join(root, strings.Replace(relRepo, "/", string(os.PathSeparator), -1))
 	// git clone / go get will have a race condition if the directory doesn't
 	// exist.
 	up := filepath.Dir(repoPath)
@@ -278,7 +278,7 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 	}
 
 	start = time.Now()
-	repoPath := filepath.Join(src, repoURL)
+	repoPath := filepath.Join(src, strings.Replace(repoURL, "/", string(os.PathSeparator), -1))
 	// go get will try to pull and will complain if the checkout is not on a
 	// branch.
 	stdout, ok := run(repoPath, "git", "checkout", "--quiet", "-B", "test", commit)
