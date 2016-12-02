@@ -208,7 +208,9 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 	repoPath := filepath.Join(root, relRepo)
 	// git clone / go get will have a race condition if the directory doesn't
 	// exist.
-	if err := os.MkdirAll(path.Dir(repoPath), 0700); err != nil && !os.IsExist(err) {
+	up := path.Dir(repoPath)
+	log.Printf("MkdirAll(%q)", up)
+	if err := os.MkdirAll(up, 0700); err != nil && !os.IsExist(err) {
 		c <- item{"<failure>\n" + err.Error() + "\n", false}
 		return
 	}
