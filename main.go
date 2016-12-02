@@ -561,17 +561,19 @@ func mainImpl() error {
 	flag.Parse()
 	log.SetFlags(0)
 	if *test == "" {
-		if strings.HasPrefix(*test, "github") {
-			return errors.New("don't prefix -test value with 'github.com/', it is already assumed")
-		}
 		if *commit != "" {
 			return errors.New("-commit doesn't make sense without -test")
 		}
 		if *useSSH {
 			return errors.New("-usessh doesn't make sense without -test")
 		}
-	} else if *commit == "" {
-		*commit = "HEAD"
+	} else {
+		if strings.HasPrefix(*test, "github.com/") {
+			return errors.New("don't prefix -test value with 'github.com/', it is already assumed")
+		}
+		if *commit == "" {
+			*commit = "HEAD"
+		}
 	}
 	fileName := "gohci.json"
 	c, err := loadConfig(fileName)
