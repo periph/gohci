@@ -117,9 +117,23 @@ systemctl start gohci_update.timer
 ### Windows
 
 
-You can create a shortcut `gohci.lnk` that points to your `gohci.exe`; set the
-working directoy accordingly, then copy the shortcut to
-`%APPDATA\Microsoft\Windows\Start Menu\Programs\Startup`.
+`gohci` works on Windows!
+
+
+#### Running on Windows automatically
+
+Create a batch file `%APPDATA\Microsoft\Windows\Start
+Menu\Programs\Startup\gohci.bat` that contains the following:
+
+```
+@echo off
+cd c:\path\to\work\dir
+:loop
+gohci
+goto loop
+```
+
+#### Auto update
 
 Auto-update can be done via the task scheduler:
 

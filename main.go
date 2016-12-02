@@ -494,46 +494,67 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 		runChecks(s.c.Checks, repo, useSSH, commit, s.gopath, results)
 		close(results)
 	}()
+
 	i := 1
 	failed := false
-	for r := range results {
-		// https://developer.github.com/v3/gists/#edit-a-gist
-		if len(r.content) == 0 {
-			r.content = "<missing>"
-		}
-		if !r.success {
-			r.name += " (failed)"
-			failed = true
-		}
-		r.name += " in " + roundTime(r.d).String()
-		gist.Files = map[github.GistFilename]github.GistFile{github.GistFilename(r.name): github.GistFile{Content: &r.content}}
-		suffix = ""
-		if i != total {
-			suffix = fmt.Sprintf(" (%d/%d)", i, total)
-		} else {
-			statusDesc = "Ran tests"
-			if !failed {
-				suffix += " (success!)"
-				status.State = github.String("success")
+	var delay <-chan time.Time
+	for {
+		select {
+		case <-delay:
+			if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
+				log.Printf("- failed to update gist: %v", err)
 			}
+			gist.Files = map[github.GistFilename]github.GistFile{}
+			if _, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status); err != nil {
+				log.Printf("- failed to update status: %v", err)
+			}
+			delay = nil
+
+		case r, ok := <-results:
+			if !ok {
+				if delay != nil {
+					if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
+						log.Printf("- failed to update gist: %v", err)
+					}
+					gist.Files = map[github.GistFilename]github.GistFile{}
+					if _, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status); err != nil {
+						log.Printf("- failed to update status: %v", err)
+					}
+				}
+				goto done
+			}
+
+			// https://developer.github.com/v3/gists/#edit-a-gist
+			if len(r.content) == 0 {
+				r.content = "<missing>"
+			}
+			if !r.success {
+				r.name += " (failed)"
+				failed = true
+			}
+			r.name += " in " + roundTime(r.d).String()
+			suffix = ""
+			if i != total {
+				suffix = fmt.Sprintf(" (%d/%d)", i, total)
+			} else {
+				statusDesc = "Ran tests"
+				if !failed {
+					suffix += " (success!)"
+					status.State = github.String("success")
+				}
+			}
+			if failed {
+				suffix += " (failed)"
+			}
+			suffix += " in " + roundTime(time.Since(start)).String()
+			gist.Files[github.GistFilename(r.name)] = github.GistFile{Content: &r.content}
+			gist.Description = github.String(gistDesc + suffix)
+			status.Description = github.String(statusDesc + suffix)
+			delay = time.After(500 * time.Millisecond)
+			i++
 		}
-		if failed {
-			suffix += " (failed)"
-		}
-		suffix += " in " + roundTime(time.Since(start)).String()
-		gist.Description = github.String(gistDesc + suffix)
-		if gist, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
-			// Just move on.
-			log.Printf("- failed to update gist: %v", err)
-		}
-		gist.Files = nil
-		status.Description = github.String(statusDesc + suffix)
-		if _, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status); err != nil {
-			// Just move on.
-			log.Printf("- failed to update status: %v", err)
-		}
-		i++
 	}
+done:
 	// This requires OAuth scope 'public_repo' or 'repo'. The problem is that
 	// this gives full write access, not just issue creation and this is
 	// problematic with the current security design of this project. Leave the
