@@ -561,6 +561,9 @@ func mainImpl() error {
 	flag.Parse()
 	log.SetFlags(0)
 	if *test == "" {
+		if strings.HasPrefix(*test, "github") {
+			return errors.New("don't prefix -test value with 'github.com/', it is already assumed")
+		}
 		if *commit != "" {
 			return errors.New("-commit doesn't make sense without -test")
 		}
