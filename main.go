@@ -539,10 +539,13 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 	// problematic with the current security design of this project. Leave the
 	// code there as this is harmless and still work is people do not care about
 	// security.
-	if len(blame) != 0 {
+	if failed && len(blame) != 0 {
+		title := fmt.Sprintf("Build %q failed on %s", s.c.Name, commit)
+		log.Printf("- Failed: %s", title)
+		log.Printf("- Blame: %v", blame)
 		// https://developer.github.com/v3/issues/#create-an-issue
 		issue := github.IssueRequest{
-			Title: github.String(fmt.Sprintf("Build %q failed on %s", s.c.Name, commit)),
+			Title: &title,
 			// TODO(maruel): Add more than just the URL but that's a start.
 			Body:      gist.HTMLURL,
 			Assignees: &blame,
