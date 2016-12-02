@@ -158,7 +158,7 @@ type file struct {
 // metadata generates the pseudo-file to present information about the worker.
 func metadata(commit, gopath string) string {
 	return fmt.Sprintf(
-		"Commit:  %s\nCPUs:    %d\nVersion: %s\nGOROOT:  %s\nGOPATH:  %s\nPATH:    %s",
+		"Commit:  %s\nCPUs:    %d\nVersion: %s\nGOROOT:  %s\nGOPATH:  %s\nPATH:    %s\n",
 		commit, runtime.NumCPU(), runtime.Version(), runtime.GOROOT(), gopath, os.Getenv("PATH"))
 }
 
@@ -208,8 +208,9 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 	// git clone / go get will have a race condition if the directory doesn't
 	// exist.
 	up := filepath.Dir(repoPath)
-	log.Printf("MkdirAll(%q)", up)
-	if err := os.MkdirAll(up, 0700); err != nil && !os.IsExist(err) {
+	err := os.MkdirAll(up, 0700)
+	log.Printf("MkdirAll(%q) -> %v", up, err)
+	if err != nil && !os.IsExist(err) {
 		c <- item{"<failure>\n" + err.Error() + "\n", false}
 		return
 	}

@@ -124,7 +124,7 @@ working directoy accordingly, then copy the shortcut to
 Auto-update can be done via the task scheduler:
 
 ```
-schtasks /create /tn "Update gohci" /tr "go get -u github.com/maruel/gohci" /sc minute /mo 10
+schtasks /create /tn "Update gohci" /tr "go get -v -u github.com/maruel/gohci" /sc minute /mo 10
 ```
 
 The task should show up with: `schtasks /query /fo table | more` or navigating
@@ -149,7 +149,7 @@ is private. For it to work you must:
 Recompiling will trigger an automatic service restart, so simply run:
 
 ```
-go get -u github.com/maruel/gohci
+go get -v -u github.com/maruel/gohci
 ```
 
 but it is not necessary, as `gohci_update.service` does it for you and
