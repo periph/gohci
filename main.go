@@ -222,7 +222,7 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 		c <- item{stdout, ok}
 	}()
 	// Sync all the repositories concurrently.
-	err := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
+	err = filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
