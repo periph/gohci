@@ -265,6 +265,10 @@ worker litterally run random code. This is not recommended.
 The default rule is that only PRs coming from the own repo (not a fork) will be
 automatically tested, plus any push to the repository.
 
+You can specify `SuperUsers` to allow all PRs created by these users to be
+tested automatically. These users can also comment `gohci: run` on any commit
+which will trigger a test run.
+
 
 ### Won't the auto-updater break my CI when you push broken code?
 
