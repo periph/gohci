@@ -38,6 +38,9 @@ It hardly can get any simpler:
 - Trivial to run as a low maintenance systemd service.
 - Designed to work great on a single core ARM CPU with minimal memory
   requirements.
+- `gohci` exits whenever the executable or `gohci.json` is updated; making it
+  easy to use an auto-updating mechanism.
+- Works on Windows.
 
 
 ## Installation
@@ -53,11 +56,19 @@ It will look like this:
 
 ```
 {
+  # The TCP port the HTTP server should listen on:
   "Port": 8080,
+  # The github webhook secret when receiving events:
   "WebHookSecret": "Create a secret and set it at github.com/user/repo/settings/hooks",
+  # The github oauth2 client token when updating status and gist:
   "Oauth2AccessToken": "Get one at https://github.com/settings/tokens",
-  "Name": "<the hostname by default>",
+  # Name of the worker as presented on the status:
+  "Name": "ogre",
+  # Accepts PRs from forks:
   "RunForPRsFromFork": false,
+  # Users that can trigger a job on any commit by commenting "gohci: run".
+  "SuperUsers": [],
+  # Commands to run:
   "Checks": [
     [
       "go",
@@ -70,7 +81,8 @@ It will look like this:
 
 Edit it based on your needs. Run again and it will start a web server. When
 `gohci` is running, updating `gohci.json` will make the process quit. It is
-assumed that you use a service manager, like systemd.
+assumed that you use a service manager, like systemd or a bash/batch file that
+continuously restart the service.
 
 
 ### OAuth2 token
@@ -97,7 +109,7 @@ Visit to `github.com/user/repo/settings/hooks` and create a new webhook.
   request`, `Pull request review comment` and `Push`.
 
 
-### systemd
+### systemd: Running automatically and auto-update
 
 Setting up as systemd means it'll run automatically. The following is
 preconfigured for a `pi` user. Edit as necessary, which is necessary if you run
@@ -114,16 +126,20 @@ systemctl start gohci.service
 systemctl start gohci_update.timer
 ```
 
+`gohci_update.timer` runs `gohci_update.service` every 10 minutes.
+
+
 ### Windows
 
 
 `gohci` works on Windows!
 
 
-#### Running on Windows automatically
+#### Windows: Running automatically
 
-Create a batch file `%APPDATA\Microsoft\Windows\Start
-Menu\Programs\Startup\gohci.bat` that contains the following:
+- First enable auto-login on a fresh low privilege account.
+- Create a batch file `%APPDATA%\Microsoft\Windows\Start
+  Menu\Programs\Startup\gohci.bat` that contains the following:
 
 ```
 @echo off
@@ -133,9 +149,10 @@ gohci
 goto loop
 ```
 
-#### Auto update
+#### Windows: Auto update
 
-Auto-update can be done via the task scheduler:
+Auto-update can be done via the task scheduler. The following command will
+auto-update `gohci` every 10 minutes:
 
 ```
 schtasks /create /tn "Update gohci" /tr "go get -v -u github.com/maruel/gohci" /sc minute /mo 10
@@ -153,21 +170,9 @@ is private. For it to work you must:
   specify a password.
 - Visit `github.com/user/repo/settings/keys`, click `Add deploy key`.
 - Put a name of the device and paste the content of the public key at
-  `/home/pi/.ssh/id_rsa.pub`.
+  `$HOME/.ssh/id_rsa.pub`, `%USERPROFILE%\.ssh\id_rsa.pub` on Windows.
 - Do not check `Allow write access`!
 - Click `Add key`.
-
-
-## Updating
-
-Recompiling will trigger an automatic service restart, so simply run:
-
-```
-go get -v -u github.com/maruel/gohci
-```
-
-but it is not necessary, as `gohci_update.service` does it for you and
-`gohci_update.timer` runs gohci_update every 10 minutes.
 
 
 ## Testing locally
@@ -231,7 +236,8 @@ ci.example.com {
 
 - Install `gohci` on each of your devices, e.g. a
   [C.H.I.P.](https://getchip.com/), a [Raspberry
-  Pi](https://www.raspberrypi.org/), a [Pine64](https://www.pine64.org/), etc.
+  Pi](https://www.raspberrypi.org/), a [Pine64](https://www.pine64.org/),
+  Windows, etc.
 - Register multiple webhooks to your repository, one per device, using the
   [explanations](#webhook) above. For each hook, use URLs in the format
   `https://1.2.3.4/github/repoA/deviceX`.
