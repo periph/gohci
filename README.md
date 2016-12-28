@@ -226,8 +226,14 @@ ci.example.com {
     gzip
     log log/ci.example.com.log
     tls youremail@example.com
-    proxy /github/repoA raspberry:8080
-    proxy /github/repoB raspberry:8081
+    proxy /github/repoA raspberry:8080 {
+      transparent
+      without /github/repoA
+    }
+    proxy /github/repoB raspberry:8081 {
+      transparent
+      without /github/repoB
+    }
 }
 ```
 
@@ -248,9 +254,18 @@ ci.example.com {
     gzip
     log log/ci.example.com.log
     tls youremail@example.com
-    proxy /github/repoA/chip chip:8080
-    proxy /github/repoA/pine64 pine64:8080
-    proxy /github/repoA/rpi3 raspberrypi:8080
+    proxy /github/repoA/chip chip:8080 {
+      transparent
+      without /github/repoA/chip
+    }
+    proxy /github/repoA/pine64 pine64:8080 {
+      transparent
+      without /github/repoA/pine64
+    }
+    proxy /github/repoA/rpi3 raspberrypi:8080 {
+      transparent
+      without /github/repoA/rpi3
+    }
 }
 ```
 
@@ -306,3 +321,11 @@ I think you are missing the point. That said, forking this code and updating
 ### Can you add support for `gd`, `glide`, etc?
 
 If there's enough interest, I'm open to adding support for more tools.
+
+
+### What about when the device dies?
+
+Micro computers tends to be unstable, so monitoring is recommended, even for a
+one-off solution. A good option is to setup https://uptimerobot.com which has a
+free plan with 50 monitored sites pinged at a 5 minutes interval. It supports
+sending SMS via common email-to-SMS provider functionality.
