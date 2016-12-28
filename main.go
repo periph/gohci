@@ -343,6 +343,16 @@ func (s *server) isSuperUser(u string) bool {
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("HTTP: %s %s", r.RemoteAddr, r.URL.Path)
 	defer r.Body.Close()
+	// The path must be the root path.
+	if r.URL.Path != "" && r.URL.Path != "/" {
+		log.Printf("- Unexpected path %s", r.URL.Path)
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method == "GET" {
+		io.WriteString(w, "OK")
+		return
+	}
 	if r.Method != "POST" {
 		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
 		log.Printf("- invalid method")
