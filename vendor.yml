@@ -4,16 +4,14 @@ vendors:
 - path: github.com/golang/protobuf
   rev: 8ee79997227bf9b34611aee7946ae64735e6fd93
 - path: github.com/google/go-github
-  rev: dccec7b5f17234b8219494c2b5b03af034e08c04
+  rev: 4b026b323c199177ad865434c0266e8bcd5ec83d
 - path: github.com/google/go-querystring
   rev: 9235644dd9e52eeae6fa48efd539fdc351a0af53
 - path: golang.org/x/net
-  rev: 97edce0b2e423f6a8debb459af47f4a3cb4ff954
+  rev: 45e771701b814666a7eb299e6c7a57d0b1799e91
 - path: golang.org/x/oauth2
-  rev: f6093e37b6cb4092101a298aba5d794eb570757f
+  rev: 314dd2c0bf3ebd592ec0d20847d27e79d0dbe8dd
 - path: golang.org/x/sys
-  rev: ca83bd2cb9abb47839b50eb4da612f00158f5870
-- path: google.golang.org/appengine
-  rev: ca59ef35f409df61fa4a5f8290ff289b37eccfb8
+  rev: d75a52659825e75fff6158388dddc6a5b04f9ba5
 - path: gopkg.in/fsnotify.v1
   rev: 629574ca2a5df945712d3079857300b5e4da0236
