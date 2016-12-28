@@ -14,7 +14,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -36,6 +35,7 @@ import (
 	"unicode/utf8"
 
 	fsnotify "gopkg.in/fsnotify.v1"
+	yaml "gopkg.in/yaml.v1"
 
 	"github.com/bugsnag/osext"
 	"github.com/google/go-github/github"
@@ -71,27 +71,28 @@ func loadConfig(fileName string) (*config, error) {
 	}
 	b, err := ioutil.ReadFile(fileName)
 	if err != nil {
-		b, err = json.MarshalIndent(c, "", "  ")
+		upgrade := false
+		j := fileName[:len(fileName)-3] + "json"
+		if b, err := ioutil.ReadFile(j); err == nil {
+			if err := json.Unmarshal(b, c); err != nil {
+				return nil, err
+			}
+			upgrade = true
+		}
+		b, err = yaml.Marshal(c)
 		if err != nil {
 			return nil, err
 		}
 		if err = ioutil.WriteFile(fileName, b, 0600); err != nil {
 			return nil, err
 		}
+		if upgrade {
+			return c, os.Remove(j)
+		}
 		return nil, fmt.Errorf("wrote new %s", fileName)
 	}
-	if err = json.Unmarshal(b, c); err != nil {
+	if err = yaml.Unmarshal(b, c); err != nil {
 		return nil, err
-	}
-	d, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(b, d) {
-		log.Printf("Updating %s in canonical format", fileName)
-		if err := ioutil.WriteFile(fileName, d, 0600); err != nil {
-			return nil, err
-		}
 	}
 	return c, nil
 }
@@ -611,7 +612,7 @@ func mainImpl() error {
 			*commit = "HEAD"
 		}
 	}
-	fileName := "gohci.json"
+	fileName := "gohci.yml"
 	c, err := loadConfig(fileName)
 	if err != nil {
 		return err

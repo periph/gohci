@@ -53,49 +53,44 @@ It hardly can get any simpler:
 - Trivial to run as a low maintenance systemd service.
 - Designed to work great on a single core ARM CPU with minimal memory
   requirements.
-- `gohci` exits whenever the executable or `gohci.json` is updated; making it
+- `gohci` exits whenever the executable or `gohci.yml` is updated; making it
   easy to use an auto-updating mechanism.
 - Works on Windows.
 
 
 ## Installation
 
-Install and create the default `gohci.json`:
+Install and create the default `gohci.yml`:
 
 ```
 go get github.com/maruel/gohci
 gohci
 ```
 
-It will look like this:
+It will look like this, with comments added here:
 
 ```
-{
-  # The TCP port the HTTP server should listen on:
-  "Port": 8080,
-  # The github webhook secret when receiving events:
-  "WebHookSecret": "Create a secret and set it at github.com/user/repo/settings/hooks",
-  # The github oauth2 client token when updating status and gist:
-  "Oauth2AccessToken": "Get one at https://github.com/settings/tokens",
-  # Name of the worker as presented on the status:
-  "Name": "ogre",
-  # Accepts PRs from forks:
-  "RunForPRsFromFork": false,
-  # Users that can trigger a job on any commit by commenting "gohci: run".
-  "SuperUsers": [],
-  # Commands to run:
-  "Checks": [
-    [
-      "go",
-      "test",
-      "./..."
-    ]
-  ]
-}
+# The TCP port the HTTP server should listen on:
+port: 8080
+# The github webhook secret when receiving events:
+webhooksecret: Create a secret and set it at github.com/user/repo/settings/hooks
+# The github oauth2 client token when updating status and gist:
+oauth2accesstoken: Get one at https://github.com/settings/tokens
+# Name of the worker as presented on the status:
+name: ogre
+# Accepts PRs from forks:
+runforprsfromfork: false
+# Users that can trigger a job on any commit by commenting "gohci: run".
+superusers: []
+# Commands to run:
+checks:
+- - go
+  - test
+  - ./...
 ```
 
 Edit based on your needs. Run `gohci` again and it will start a web server. When
-`gohci` is running, updating `gohci.json` will make the process quit. It is
+`gohci` is running, updating `gohci.yml` will make the process quit. It is
 assumed that you use a service manager, like systemd or a bash/batch file that
 continuously restart the service.
 
@@ -109,7 +104,7 @@ continuously restart the service.
 - Check `gist` and `repo:status`
   - Do not give any write access to this token!
 - Click `Generate token`
-- Put the hex string into `AccessToken` in `gohci.json`. This is needed to
+- Put the hex string into `AccessToken` in `gohci.yml`. This is needed to
   create the gists and put success/failure status on the Pull Requests.
 
 
@@ -119,7 +114,7 @@ Visit to `github.com/user/repo/settings/hooks` and create a new webhook.
 
 - Use your worker IP address or hostname as the hook URL,
   `https://1.2.3.4/github/repoA`.
-- Type a random string, that you will put in `WebHookSecret` in `gohci.json`.
+- Type a random string, that you will put in `WebHookSecret` in `gohci.yml`.
 - Click `Let me select individual events` and check: `Commit comment`, `Pull
   request`, `Pull request review comment` and `Push`.
 
@@ -230,7 +225,7 @@ To run multiple instances:
 - Copy paste `gohci.service` multiple times. Don't duplicate
   `gohci_update.service` and `gohci_update.timer`, just `gohci.service`!
 - Make each one use a *different* `WorkingDirectory=` value.
-- In each directory, create a `gohci.json` and use a different `Port`.
+- In each directory, create a `gohci.yml` and use a different `Port`.
 - Register and start the services via systemd via `systemctl` commands [listed
   above](#systemd).
 - Your `Caddyfile` file should look like the following. You can also run Caddy
