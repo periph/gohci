@@ -12,7 +12,7 @@ _serverless_ CI.
 
 The result is the distilled essence of a Continuous Integration service that
 leans heavily toward testing Go projects on hardware, specifically low power
-ones (Raspberry Pis, C.H.I.P., etc).
+ones (Raspberry Pis, C.H.I.P., BeagleBone, etc).
 
 
 ## Design
@@ -20,8 +20,8 @@ ones (Raspberry Pis, C.H.I.P., etc).
 It hardly can get any simpler:
 
 - Only support one specific use case: *Golang project hosted on Github*.
-- There is no server, the worker must be internet accessible and HTTPS must be
-  proxied down to HTTP.
+- There is no server, only a worker. The worker must be internet accessible and
+  HTTPS must be proxied down to HTTP.
   - [Caddy](https://caddyserver.com/) works great along its native
     [letsencrypt.org](https://letsencrypt.org) support.
 - The worker has a configuration file that determines what command it runs to
@@ -236,7 +236,7 @@ ci.example.com {
 
 - Install `gohci` on each of your devices, e.g. a
   [C.H.I.P.](https://getchip.com/), a [Raspberry
-  Pi](https://www.raspberrypi.org/), a [Pine64](https://www.pine64.org/),
+  Pi](https://www.raspberrypi.org/), a [BeagleBone](https://beagleboard.org/),
   Windows, etc.
 - Register multiple webhooks to your repository, one per device, using the
   [explanations](#webhook) above. For each hook, use URLs in the format
@@ -278,11 +278,6 @@ copy. Don't forget to update `gohci_update.timer` to pull from your repository
 instead.
 
 
-### Why `gohci` doesn't have unit tests?
-
-Because I like ironic projects.
-
-
 ### What's the maximum testing rate per hour?
 
 Github has a free quota of [5000 requests per
@@ -298,17 +293,8 @@ requests. Each test run does:
 
 So a configuration defining 7 tests would sum for `3 + 1 + (2 * (7+2))` = 22
 requests. 5000/13 = *227 test runs/hour*. If you have 3 workers, this means an
-upper bound of *75 test runs/hour*.
-
-If this becomes a problem, the number of requests can be lowered up to:
-
-- 1 create status request for pending
-- 1 create status request at the start
-- 1 create status request at the end
-- 1 gists create request at the end
-
-at the cost of having no updates while the task is running. This would enable
-1250 test runs/hour.
+upper bound of *75 test runs/hour*. In practice, `gohci` throttles its requests
+so the effective number of requests is lower.
 
 
 ### Can you add support for node.js, ruby, C++, etc?
@@ -319,6 +305,4 @@ I think you are missing the point. That said, forking this code and updating
 
 ### Can you add support for `gd`, `glide`, etc?
 
-The project's goal is to be very simple. Forking this code and updating
-`runChecks()` accordingly would do just fine. That said, if there's enough
-interest, I'm open to adding more support.
+If there's enough interest, I'm open to adding support for more tools.
