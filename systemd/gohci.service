@@ -29,7 +29,7 @@ Group=pi
 KillMode=mixed
 Restart=always
 TimeoutStopSec=20s
-ExecStart=/home/pi/bin/go/gohci
+ExecStart=/home/pi/go/bin/gohci
 WorkingDirectory=/home/pi/gohci
 
 # To use port 80:
@@ -42,6 +42,8 @@ WorkingDirectory=/home/pi/gohci
 # Set this if you run a custom Go version that is not installed in
 # /usr/local/go:
 # Environment=PATH=/home/pi/golang/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin GOROOT=/home/pi/golang GOPATH=/home/pi/go
+# This shouldn't be necessary with Go 1.8+
+Environment=GOPATH=/home/pi/go
 
 [Install]
 WantedBy=multi-user.target

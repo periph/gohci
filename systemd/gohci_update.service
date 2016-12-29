@@ -31,3 +31,5 @@ ExecStart=/bin/sh -l -c "go get -v -u github.com/maruel/gohci"
 # Set this if you run a custom Go version that is not installed in
 # /usr/local/go:
 # Environment=PATH=/home/pi/golang/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin GOROOT=/home/pi/golang GOPATH=/home/pi/go
+# This shouldn't be necessary with Go 1.8+
+Environment=GOPATH=/home/pi/go
