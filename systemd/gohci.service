@@ -24,6 +24,7 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
+# Change 'pi' everywhere in this file with the actual user account.
 User=pi
 Group=pi
 KillMode=mixed
@@ -39,11 +40,13 @@ WorkingDirectory=/home/pi/gohci
 #  SecureBits=keep-caps
 #  Capabilities=cap_net_bind_service+pie
 
-# Set this if you run a custom Go version that is not installed in
-# /usr/local/go:
+# Choose one of the following. GOPATH won't be necessary with Go 1.8+:
+# - Normal installation of a recent Go version in /usr/local/go:
+Environment=PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin GOPATH=/home/pi/go
+# - Local compilation (e.g. trying a beta):
 # Environment=PATH=/home/pi/golang/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin GOROOT=/home/pi/golang GOPATH=/home/pi/go
-# This shouldn't be necessary with Go 1.8+
-Environment=GOPATH=/home/pi/go
+# - Using the Go debian package.
+# Environment=GOPATH=/home/pi/go
 
 [Install]
 WantedBy=multi-user.target
