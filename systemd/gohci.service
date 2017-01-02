@@ -49,4 +49,4 @@ Environment=PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr
 # Environment=GOPATH=/home/pi/go
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
