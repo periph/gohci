@@ -10,15 +10,19 @@ _serverless_ CI.
 
 The result is the distilled essence of a Continuous Integration service that
 leans heavily toward testing Go projects on hardware, specifically low power
-ones (Raspberry Pis, C.H.I.P., BeagleBone, etc).
+ones (Raspberry Pis, C.H.I.P., BeagleBone, ODROID, etc).
 
 
 ## Pictures
 
-A gohci lab testing a Go project interacting with board looks like:
+A gohci lab testing a Go project interacting with board:
 
 ![lab](https://raw.githubusercontent.com/wiki/maruel/gohci/lab.jpg
 "lab")
+
+Not pictured above is the Windows 10 VM that ensures the code also compiles on
+other platforms.
+
 
 Here's how it looks like on a PR when the workers start to handle it:
 
@@ -90,7 +94,7 @@ It will look like this:
 }
 ```
 
-Edit it based on your needs. Run again and it will start a web server. When
+Edit based on your needs. Run `gohci` again and it will start a web server. When
 `gohci` is running, updating `gohci.json` will make the process quit. It is
 assumed that you use a service manager, like systemd or a bash/batch file that
 continuously restart the service.
@@ -205,7 +209,7 @@ setup.
 ## Security
 
 This is a remote execution engine so assume the host that is running `gohci`
-will be 0wned. That's it. Use a strong webhook secret.
+will be 0wned. Still, use a strong randomly generated webhook secret.
 
 The main problem is someone could steal the OAuth2 token which means the
 attacker can:
@@ -320,13 +324,7 @@ requests. Each test run does:
 So a configuration defining 7 tests would sum for `3 + 1 + (2 * (7+2))` = 22
 requests. 5000/13 = *227 test runs/hour*. If you have 3 workers, this means an
 upper bound of *75 test runs/hour*. In practice, `gohci` throttles its requests
-so the effective number of requests is lower.
-
-
-### Can you add support for node.js, ruby, C++, etc?
-
-I think you are missing the point. That said, forking this code and updating
-`runChecks()` accordingly would do just fine.
+so the effective number of requests per build is lower.
 
 
 ### Can you add support for `gd`, `glide`, etc?
