@@ -1,19 +1,5 @@
 # gohci - The Go on Hardware CI
 
-Here's how a professional`*` gohci lab testing real hardware (a small board in
-this case) driven by Go code hosted on a private repository on github looks
-like:
-
-![lab](https://raw.githubusercontent.com/wiki/maruel/gohci/lab.jpg
-"lab")
-
-`*` for some definition of "professional"
-
-Here's how it looks like on a PR when the workers start to handle it:
-
-![screen cast](https://raw.githubusercontent.com/wiki/maruel/gohci/gohci.gif
-"screen cast")
-
 
 ## Genesis
 
@@ -25,6 +11,19 @@ _serverless_ CI.
 The result is the distilled essence of a Continuous Integration service that
 leans heavily toward testing Go projects on hardware, specifically low power
 ones (Raspberry Pis, C.H.I.P., BeagleBone, etc).
+
+
+## Pictures
+
+A gohci lab testing a Go project interacting with board looks like:
+
+![lab](https://raw.githubusercontent.com/wiki/maruel/gohci/lab.jpg
+"lab")
+
+Here's how it looks like on a PR when the workers start to handle it:
+
+![screen cast](https://raw.githubusercontent.com/wiki/maruel/gohci/gohci.gif
+"screen cast")
 
 
 ## Design
