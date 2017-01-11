@@ -1,6 +1,17 @@
 # gohci - The Go on Hardware CI
 
 
+*   [Genesis](#genesis)
+*   [Pictures](#pictures)
+*   [Design](#design)
+*   [Features](#features)
+*   [Installation](#installation)
+*   [Private repository](#private-repository)
+*   [Testing](#testing)
+*   [Security](#security)
+*   [FAQ](#faq)
+
+
 ## Genesis
 
 All I wanted was to run `go test ./...` on a Raspberry Pi on both Pull Requests
@@ -28,6 +39,12 @@ Here's how it looks like on a PR when the workers start to handle it:
 
 ![screen cast](https://raw.githubusercontent.com/wiki/maruel/gohci/gohci.gif
 "screen cast")
+
+
+View of the status on commits:
+
+![commits](https://raw.githubusercontent.com/wiki/maruel/gohci/commits.png
+"commits")
 
 
 ## Design
@@ -172,7 +189,7 @@ The task should show up with: `schtasks /query /fo table | more` or navigating
 the GUI with `taskschd.msc`.
 
 
-## Testing a private repository
+## Private repository
 
 `gohci` will automatically switch from HTTPS to SSH checkout when the repository
 is private. For it to work you must:
@@ -185,7 +202,7 @@ is private. For it to work you must:
 - Click `Add key`.
 
 
-## Testing locally
+## Testing
 
 To test your hook, run:
 
