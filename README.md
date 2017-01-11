@@ -26,7 +26,7 @@ ones (Raspberry Pis, C.H.I.P., BeagleBone, ODROID, etc).
 
 ## Pictures
 
-A gohci lab testing a Go project interacting with board:
+A gohci lab testing a Go project that interacts with a board:
 
 ![lab](https://raw.githubusercontent.com/wiki/maruel/gohci/lab.jpg
 "lab")
