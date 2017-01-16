@@ -39,6 +39,7 @@ import (
 
 	"github.com/bugsnag/osext"
 	"github.com/google/go-github/github"
+	"github.com/maruel/gohci/lib"
 	"golang.org/x/oauth2"
 )
 
@@ -600,7 +601,9 @@ func mainImpl() error {
 	commit := flag.String("commit", "", "commit SHA1 to test and update; will only update status on github if not 'HEAD'")
 	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS; only necessary when testing")
 	flag.Parse()
-	log.SetFlags(0)
+	if runtime.GOOS != "windows" {
+		log.SetFlags(0)
+	}
 	if *test == "" {
 		if *commit != "" {
 			return errors.New("-commit doesn't make sense without -test")
@@ -713,6 +716,8 @@ func mainImpl() error {
 	} else if err = w.Add(fileName); err != nil {
 		log.Printf("Failed to initialize watcher: %v", err)
 	}
+
+	lib.SetConsoleTitle(fmt.Sprintf("gohci - %s - %s", a, wd))
 	if err == nil {
 		select {
 		case <-w.Events:
