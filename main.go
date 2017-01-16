@@ -356,7 +356,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != "POST" {
 		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
-		log.Printf("- invalid method")
+		log.Printf("- invalid method %s", r.Method)
 		return
 	}
 	payload, err := github.ValidatePayload(r, []byte(s.c.WebHookSecret))
