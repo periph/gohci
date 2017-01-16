@@ -342,12 +342,16 @@ func (s *server) isSuperUser(u string) bool {
 // done so the user is immediately alerted that the task is pending on the
 // host. Only one task runs at a time.
 func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("HTTP: %s %s", r.RemoteAddr, r.URL.Path)
+	log.Printf("%-4s %-21s %s", r.Method, r.RemoteAddr, r.URL.Path)
 	defer r.Body.Close()
 	// The path must be the root path.
 	if r.URL.Path != "" && r.URL.Path != "/" {
 		log.Printf("- Unexpected path %s", r.URL.Path)
 		http.NotFound(w, r)
+		return
+	}
+	if r.Method == "HEAD" {
+		w.WriteHeader(200)
 		return
 	}
 	if r.Method == "GET" {
