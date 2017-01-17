@@ -14,7 +14,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -72,23 +71,12 @@ func loadConfig(fileName string) (*config, error) {
 	}
 	b, err := ioutil.ReadFile(fileName)
 	if err != nil {
-		upgrade := false
-		j := fileName[:len(fileName)-3] + "json"
-		if b, err := ioutil.ReadFile(j); err == nil {
-			if err := json.Unmarshal(b, c); err != nil {
-				return nil, err
-			}
-			upgrade = true
-		}
 		b, err = yaml.Marshal(c)
 		if err != nil {
 			return nil, err
 		}
 		if err = ioutil.WriteFile(fileName, b, 0600); err != nil {
 			return nil, err
-		}
-		if upgrade {
-			return c, os.Remove(j)
 		}
 		return nil, fmt.Errorf("wrote new %s", fileName)
 	}
