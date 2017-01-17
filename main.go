@@ -42,6 +42,8 @@ import (
 	"golang.org/x/oauth2"
 )
 
+var start time.Time
+
 type config struct {
 	Port              int        // TCP port number for HTTP server.
 	WebHookSecret     string     // https://developer.github.com/webhooks/
@@ -344,7 +346,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == "GET" {
-		io.WriteString(w, "OK")
+		// Return the uptime. This is a small enough information leak.
+		io.WriteString(w, time.Since(start).String())
 		return
 	}
 	if r.Method != "POST" {
@@ -585,6 +588,7 @@ done:
 }
 
 func mainImpl() error {
+	start = time.Now()
 	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'maruel/gohci'")
 	commit := flag.String("commit", "", "commit SHA1 to test and update; will only update status on github if not 'HEAD'")
 	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS; only necessary when testing")
