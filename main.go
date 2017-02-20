@@ -599,22 +599,26 @@ func mainImpl() error {
 	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'maruel/gohci'")
 	commit := flag.String("commit", "", "commit SHA1 to test and update; will only update status on github if not 'HEAD'")
 	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS; only necessary when testing")
+	update := flag.Bool("update", false, "when coupled with -test and -commit, update the remote repository")
 	flag.Parse()
 	if runtime.GOOS != "windows" {
 		log.SetFlags(0)
 	}
-	if *test == "" {
-		if *commit != "" {
+	if len(*test) == 0 {
+		if len(*commit) != 0 {
 			return errors.New("-commit doesn't make sense without -test")
 		}
 		if *useSSH {
 			return errors.New("-usessh doesn't make sense without -test")
 		}
+		if *update {
+			return errors.New("-update can only be used with -test")
+		}
 	} else {
 		if strings.HasPrefix(*test, "github.com/") {
 			return errors.New("don't prefix -test value with 'github.com/', it is already assumed")
 		}
-		if *commit == "" {
+		if len(*commit) == 0 {
 			*commit = "HEAD"
 		}
 	}
@@ -665,7 +669,7 @@ func mainImpl() error {
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
 	s := server{c: c, client: github.NewClient(tc), gopath: gopath, cmds: cmds}
 	if len(*test) != 0 {
-		if *commit == "HEAD" {
+		if !*update {
 			// Only run locally.
 			results := make(chan file)
 			var wg sync.WaitGroup
@@ -691,6 +695,8 @@ func mainImpl() error {
 		// TODO(maruel): Return any error that occured.
 		return nil
 	}
+
+	// Run the web server.
 	http.Handle("/", &s)
 	thisFile, err := osext.Executable()
 	if err != nil {
