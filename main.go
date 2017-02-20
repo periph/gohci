@@ -49,6 +49,7 @@ type config struct {
 	WebHookSecret     string     // https://developer.github.com/webhooks/
 	Oauth2AccessToken string     // https://github.com/settings/tokens, check "repo:status" and "gist"
 	Name              string     // Display name to use in the status report on Github.
+	AltPath           string     // Alternative package path to use. Defaults to the actual path.
 	RunForPRsFromFork bool       // Runs PRs coming from a fork. This means your worker will run uncontrolled code.
 	SuperUsers        []string   // List of github accounts that can trigger a run. In practice any user with write access is a super user but OAuth2 tokens with limited scopes cannot get this information.
 	Checks            [][]string // Commands to run to test the repository. They are run one after the other from the repository's root.
@@ -67,6 +68,7 @@ func loadConfig(fileName string) (*config, error) {
 		WebHookSecret:     "Create a secret and set it at github.com/user/repo/settings/hooks",
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
 		Name:              hostname,
+		AltPath:           "",
 		RunForPRsFromFork: false,
 		SuperUsers:        []string{},
 		Checks:            [][]string{{"go", "test", "./..."}},
@@ -204,9 +206,9 @@ type setupWorkResult struct {
 //
 // The goal is to make "go get -t -d" as fast as possible, as all repositories
 // are already synced to HEAD.
-func syncParallel(root, relRepo, cloneURL string, c chan<- setupWorkResult) {
-	// relRepo is handled differently than the other.
-	repoPath := filepath.Join(root, strings.Replace(relRepo, "/", string(os.PathSeparator), -1))
+//
+// cloneURL is fetched into repoPath.
+func syncParallel(root, cloneURL, repoPath string, c chan<- setupWorkResult) {
 	// git clone / go get will have a race condition if the directory doesn't
 	// exist.
 	up := filepath.Dir(repoPath)
@@ -254,7 +256,7 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- setupWorkResult) {
 //
 // It aggressively concurrently fetches all repositories in `gopath` to
 // accelerate the processing.
-func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath string, results chan<- file) bool {
+func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit, gopath string, results chan<- file) bool {
 	repoURL := "github.com/" + repoName
 	src := filepath.Join(gopath, "src")
 	c := make(chan setupWorkResult)
@@ -262,10 +264,16 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 	if useSSH {
 		cloneURL = "git@github.com:" + repoName
 	}
+	repoPath := ""
+	if len(altPath) != 0 {
+		repoPath = filepath.Join(src, strings.Replace(altPath, "/", string(os.PathSeparator), -1))
+	} else {
+		repoPath = filepath.Join(src, strings.Replace(repoURL, "/", string(os.PathSeparator), -1))
+	}
 	start := time.Now()
 	go func() {
-		syncParallel(src, repoURL, cloneURL, c)
-		close(c)
+		defer close(c)
+		syncParallel(src, cloneURL, repoPath, c)
 	}()
 	setupSync := setupWorkResult{"", true}
 	for i := range c {
@@ -280,7 +288,6 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 	}
 
 	start = time.Now()
-	repoPath := filepath.Join(src, strings.Replace(repoURL, "/", string(os.PathSeparator), -1))
 	// go get will try to pull and will complain if the checkout is not on a
 	// branch.
 	stdout, ok := run(repoPath, "git", "checkout", "--quiet", "-B", "test", commit)
@@ -505,7 +512,7 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		runChecks(s.c.Checks, repo, useSSH, commit, s.gopath, results)
+		runChecks(s.c.Checks, repo, s.c.AltPath, useSSH, commit, s.gopath, results)
 		close(results)
 	}()
 
@@ -684,7 +691,7 @@ func mainImpl() error {
 				}
 			}()
 			fmt.Printf("--- setup-0-metadata\n%s", metadata(*commit, gopath))
-			success := runChecks(c.Checks, *test, *useSSH, *commit, gopath, results)
+			success := runChecks(c.Checks, *test, c.AltPath, *useSSH, *commit, gopath, results)
 			close(results)
 			wg.Wait()
 			_, err := fmt.Printf("\nSuccess: %t\n", success)

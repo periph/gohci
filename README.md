@@ -95,6 +95,9 @@ webhooksecret: Create a secret and set it at github.com/user/repo/settings/hooks
 oauth2accesstoken: Get one at https://github.com/settings/tokens
 # Name of the worker as presented on the status:
 name: ogre
+# Alternative path to use to checkout the git repository, can be an alternative
+# name like "golang.org/x/tools".
+alt_path: ""
 # Accepts PRs from forks:
 runforprsfromfork: false
 # Users that can trigger a job on any commit by commenting "gohci: run".
