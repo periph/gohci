@@ -88,6 +88,8 @@ func loadConfig(fileName string) (*config, error) {
 	return c, nil
 }
 
+// normalizeUTF8 returns valid UTF8 from potentially incorrectly encoded data
+// from an untrusted process.
 func normalizeUTF8(b []byte) []byte {
 	if utf8.Valid(b) {
 		return b
@@ -143,6 +145,9 @@ func run(cwd string, cmd ...string) (string, bool) {
 }
 
 // file is an item in the gist.
+//
+// It represents either the stdout of a command or metadata. They are created
+// by processing fileToPush.
 type file struct {
 	name, content string
 	success       bool
@@ -154,11 +159,6 @@ func metadata(commit, gopath string) string {
 	return fmt.Sprintf(
 		"Commit:  %s\nCPUs:    %d\nVersion: %s\nGOROOT:  %s\nGOPATH:  %s\nPATH:    %s\n",
 		commit, runtime.NumCPU(), runtime.Version(), runtime.GOROOT(), gopath, os.Getenv("PATH"))
-}
-
-type item struct {
-	content string
-	ok      bool
 }
 
 // cloneOrFetch is meant to be used on the primary repository, making sure it
@@ -188,6 +188,14 @@ func pullRepo(repoPath string) (string, bool) {
 	return stdout, ok
 }
 
+// setupWorkResult is metadata to add to the 'setup' pseudo-steps.
+//
+// It is used to track the work as all repositories are pulled concurrently, then used.
+type setupWorkResult struct {
+	content string
+	ok      bool
+}
+
 // syncParallel checkouts out one repository if missing, and syncs all the
 // other git repositories found under the root directory concurrently.
 //
@@ -196,7 +204,7 @@ func pullRepo(repoPath string) (string, bool) {
 //
 // The goal is to make "go get -t -d" as fast as possible, as all repositories
 // are already synced to HEAD.
-func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
+func syncParallel(root, relRepo, cloneURL string, c chan<- setupWorkResult) {
 	// relRepo is handled differently than the other.
 	repoPath := filepath.Join(root, strings.Replace(relRepo, "/", string(os.PathSeparator), -1))
 	// git clone / go get will have a race condition if the directory doesn't
@@ -205,7 +213,7 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 	err := os.MkdirAll(up, 0700)
 	log.Printf("MkdirAll(%q) -> %v", up, err)
 	if err != nil && !os.IsExist(err) {
-		c <- item{"<failure>\n" + err.Error() + "\n", false}
+		c <- setupWorkResult{"<failure>\n" + err.Error() + "\n", false}
 		return
 	}
 	var wg sync.WaitGroup
@@ -213,7 +221,7 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 	go func() {
 		defer wg.Done()
 		stdout, ok := cloneOrFetch(repoPath, cloneURL)
-		c <- item{stdout, ok}
+		c <- setupWorkResult{stdout, ok}
 	}()
 	// Sync all the repositories concurrently.
 	err = filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
@@ -230,7 +238,7 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 			go func(p string) {
 				defer wg.Done()
 				stdout, ok := pullRepo(p)
-				c <- item{stdout, ok}
+				c <- setupWorkResult{stdout, ok}
 			}(path)
 			return filepath.SkipDir
 		}
@@ -238,7 +246,7 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 	})
 	wg.Wait()
 	if err != nil {
-		c <- item{"<directory walking failure>\n" + err.Error() + "\n", false}
+		c <- setupWorkResult{"<directory walking failure>\n" + err.Error() + "\n", false}
 	}
 }
 
@@ -249,7 +257,7 @@ func syncParallel(root, relRepo, cloneURL string, c chan<- item) {
 func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath string, results chan<- file) bool {
 	repoURL := "github.com/" + repoName
 	src := filepath.Join(gopath, "src")
-	c := make(chan item)
+	c := make(chan setupWorkResult)
 	cloneURL := "https://" + repoURL
 	if useSSH {
 		cloneURL = "git@github.com:" + repoName
@@ -259,15 +267,15 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 		syncParallel(src, repoURL, cloneURL, c)
 		close(c)
 	}()
-	setup := item{"", true}
+	setupSync := setupWorkResult{"", true}
 	for i := range c {
-		setup.content += i.content
+		setupSync.content += i.content
 		if !i.ok {
-			setup.ok = false
+			setupSync.ok = false
 		}
 	}
-	results <- file{"setup-1-sync", setup.content, setup.ok, time.Since(start)}
-	if !setup.ok {
+	results <- file{"setup-1-sync", setupSync.content, setupSync.ok, time.Since(start)}
+	if !setupSync.ok {
 		return false
 	}
 
@@ -276,19 +284,18 @@ func runChecks(cmds [][]string, repoName string, useSSH bool, commit, gopath str
 	// go get will try to pull and will complain if the checkout is not on a
 	// branch.
 	stdout, ok := run(repoPath, "git", "checkout", "--quiet", "-B", "test", commit)
-	// Reuse the object.
-	setup.content = stdout
+	setupGet := setupWorkResult{stdout, ok}
 	if ok {
 		stdout, ok = run(repoPath, "go", "get", "-v", "-d", "-t", "./...")
-		setup.content += stdout
+		setupGet.content += stdout
 		if ok {
 			// Precompilation has a dramatic effect on a Raspberry Pi.
 			stdout, ok = run(repoPath, "go", "test", "-i", "./...")
-			setup.content += stdout
+			setupGet.content += stdout
 		}
 	}
-	results <- file{"setup-2-get", setup.content, ok, time.Since(start)}
-	setup.content = ""
+	results <- file{"setup-2-get", setupGet.content, ok, time.Since(start)}
+	setupGet.content = ""
 	if ok {
 		// Finally run the checks!
 		for i, cmd := range cmds {
