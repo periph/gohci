@@ -13,7 +13,7 @@
 # - https://www.freedesktop.org/software/systemd/man/systemd.unit.html
 
 [Unit]
-Description=Runs "go get -u github.com/maruel/gohci" as a cron job
+Description=Runs "go get -u github.com/periph/gohci" as a cron job
 
 [Timer]
 OnBootSec=1min

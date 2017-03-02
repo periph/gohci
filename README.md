@@ -28,7 +28,7 @@ ones (Raspberry Pis, C.H.I.P., BeagleBone, ODROID, etc).
 
 A gohci lab testing a Go project that interacts with a board:
 
-![lab](https://raw.githubusercontent.com/wiki/maruel/gohci/lab.jpg
+![lab](https://raw.githubusercontent.com/wiki/periph/gohci/lab.jpg
 "lab")
 
 Not pictured above is the Windows 10 VM that ensures the code also compiles on
@@ -37,13 +37,13 @@ other platforms.
 
 Here's how it looks like on a PR when the workers start to handle it:
 
-![screen cast](https://raw.githubusercontent.com/wiki/maruel/gohci/gohci.gif
+![screen cast](https://raw.githubusercontent.com/wiki/periph/gohci/gohci.gif
 "screen cast")
 
 
 View of the status on commits:
 
-![commits](https://raw.githubusercontent.com/wiki/maruel/gohci/commits.png
+![commits](https://raw.githubusercontent.com/wiki/periph/gohci/commits.png
 "commits")
 
 
@@ -80,7 +80,7 @@ It hardly can get any simpler:
 Install and create the default `gohci.yml`:
 
 ```
-go get github.com/maruel/gohci
+go get github.com/periph/gohci
 gohci
 ```
 
@@ -185,7 +185,7 @@ Auto-update can be done via the task scheduler. The following command will
 auto-update `gohci` every 10 minutes:
 
 ```
-schtasks /create /tn "Update gohci" /tr "go get -v -u github.com/maruel/gohci" /sc minute /mo 10
+schtasks /create /tn "Update gohci" /tr "go get -v -u github.com/periph/gohci" /sc minute /mo 10
 ```
 
 The task should show up with: `schtasks /query /fo table | more` or navigating
@@ -210,10 +210,10 @@ is private. For it to work you must:
 To test your hook, run:
 
 ```
-gohci -test maruel/gohci
+gohci -test periph/gohci
 ```
 
-where `maruel/gohci` is replaced with the repository you want to fetch and test
+where `periph/gohci` is replaced with the repository you want to fetch and test
 at `HEAD`. Use `-commit` and it'll create the gist and the status on the commit.
 Useful when testing checks.
 

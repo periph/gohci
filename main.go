@@ -38,7 +38,7 @@ import (
 
 	"github.com/bugsnag/osext"
 	"github.com/google/go-github/github"
-	"github.com/maruel/gohci/lib"
+	"github.com/periph/gohci/lib"
 	"golang.org/x/oauth2"
 )
 

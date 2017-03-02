@@ -28,7 +28,7 @@ User=pi
 Group=pi
 NoNewPrivileges=true
 # /bin/sh is necessary to load .profile to set $GOPATH:
-ExecStart=/bin/sh -l -c "go get -v -u github.com/maruel/gohci"
+ExecStart=/bin/sh -l -c "go get -v -u github.com/periph/gohci"
 
 # Choose one of the following. GOPATH won't be necessary with Go 1.8+:
 # - Normal installation of a recent Go version in /usr/local/go:
