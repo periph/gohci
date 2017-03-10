@@ -711,6 +711,8 @@ func mainImpl() error {
 	}
 	log.Printf("Running in: %s", wd)
 	log.Printf("Executable: %s", thisFile)
+	log.Printf("Name: %s", c.Name)
+	log.Printf("AltPath: %s", c.AltPath)
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", c.Port))
 	if err != nil {
 		return err
