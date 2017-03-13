@@ -163,7 +163,7 @@ func metadata(commit, gopath string) string {
 		commit, runtime.NumCPU(), runtime.Version(), runtime.GOROOT(), gopath, os.Getenv("PATH"))
 	if runtime.GOOS != "windows" {
 		if s, err := exec.Command("uname", "-a").CombinedOutput(); err == nil {
-			out += "uname:   " + string(s) + "\n"
+			out += "uname:   " + strings.TrimSpace(string(s)) + "\n"
 		}
 	}
 	return out
