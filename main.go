@@ -158,9 +158,15 @@ type file struct {
 
 // metadata generates the pseudo-file to present information about the worker.
 func metadata(commit, gopath string) string {
-	return fmt.Sprintf(
+	out := fmt.Sprintf(
 		"Commit:  %s\nCPUs:    %d\nVersion: %s\nGOROOT:  %s\nGOPATH:  %s\nPATH:    %s\n",
 		commit, runtime.NumCPU(), runtime.Version(), runtime.GOROOT(), gopath, os.Getenv("PATH"))
+	if runtime.GOOS != "windows" {
+		if s, err := exec.Command("uname", "-a").CombinedOutput(); err == nil {
+			out += "uname:   " + string(s) + "\n"
+		}
+	}
+	return out
 }
 
 // cloneOrFetch is meant to be used on the primary repository, making sure it
