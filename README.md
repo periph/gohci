@@ -1,5 +1,6 @@
 # gohci - The Go on Hardware CI
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/periph/gohci)](https://goreportcard.com/report/github.com/periph/gohci)
 
 *   [Genesis](#genesis)
 *   [Pictures](#pictures)

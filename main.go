@@ -70,14 +70,17 @@ func loadConfig(fileName string) (*config, error) {
 		Name:              hostname,
 		AltPath:           "",
 		RunForPRsFromFork: false,
-		SuperUsers:        []string{},
-		Checks:            [][]string{{"go", "test", "./..."}},
+		SuperUsers:        nil,
+		Checks:            nil,
 	}
 	b, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		b, err = yaml.Marshal(c)
 		if err != nil {
 			return nil, err
+		}
+		if len(c.Checks) == 0 {
+			c.Checks = [][]string{{"go", "test", "./..."}}
 		}
 		if err = ioutil.WriteFile(fileName, b, 0600); err != nil {
 			return nil, err
@@ -86,6 +89,9 @@ func loadConfig(fileName string) (*config, error) {
 	}
 	if err = yaml.Unmarshal(b, c); err != nil {
 		return nil, err
+	}
+	if len(c.Checks) == 0 {
+		c.Checks = [][]string{{"go", "test", "./..."}}
 	}
 	return c, nil
 }
@@ -315,7 +321,6 @@ func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit, g
 			start = time.Now()
 			stdout, ok2 := run(repoPath, cmd...)
 			results <- file{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
-			stdout = ""
 			if !ok2 {
 				// Still run the other tests.
 				ok = false
@@ -381,67 +386,73 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("- invalid secret")
 		return
 	}
-	if t := github.WebHookType(r); t != "ping" {
-		event, err := github.ParseWebHook(t, payload)
-		if err != nil {
-			http.Error(w, "Invalid payload", http.StatusBadRequest)
-			log.Printf("- invalid payload")
-			return
-		}
-		// Process the rest asynchronously so the hook doesn't take too long.
-		switch event := event.(type) {
-		case *github.CommitCommentEvent:
-			// https://developer.github.com/v3/activity/events/types/#commitcommentevent
-			if s.isSuperUser(*event.Sender.Login) && strings.HasPrefix(*event.Comment.Body, "gohci:") {
-				s.runCheckAsync(*event.Repo.FullName, *event.Comment.CommitID, *event.Repo.Private, nil)
-			}
-
-		case *github.IssueCommentEvent:
-			// We'd need the PR's commit head but it is not in the webhook payload.
-			// This means we'd require read access to the issues, which the OAuth
-			// token shouldn't have. This is because there is no read access to the
-			// issue without write access.
-			log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
-
-		case *github.PullRequestEvent:
-			log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.ID, *event.Sender.Login, *event.Action)
-			if *event.Action != "opened" && *event.Action != "synchronized" {
-				log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
-			} else if (!s.c.RunForPRsFromFork && *event.Repo.FullName != *event.PullRequest.Head.Repo.FullName) && !s.isSuperUser(*event.Sender.Login) {
-				// A PR from a fork and these are not allowed AND not a super user.
-				log.Printf("- ignoring PR from forked repo %q", *event.PullRequest.Head.Repo.FullName)
-			} else {
-				s.runCheckAsync(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private, nil)
-			}
-
-		case *github.PushEvent:
-			if event.HeadCommit == nil {
-				log.Printf("- Push %s %s <deleted>", *event.Repo.FullName, *event.Ref)
-			} else {
-				log.Printf("- Push %s %s %s", *event.Repo.FullName, *event.Ref, *event.HeadCommit.ID)
-				// TODO(maruel): Potentially leverage event.Repo.DefaultBranch or
-				// event.Repo.MasterBranch?
-				if !strings.HasPrefix(*event.Ref, "refs/heads/") {
-					log.Printf("- ignoring branch %q for push", *event.Ref)
-				} else {
-					var blame []string
-					if *event.Ref == "refs/heads/master" {
-						author := *event.HeadCommit.Author.Login
-						committer := *event.HeadCommit.Committer.Login
-						if author != committer {
-							blame = []string{author, committer}
-						} else {
-							blame = []string{author}
-						}
-					}
-					s.runCheckAsync(*event.Repo.FullName, *event.HeadCommit.ID, *event.Repo.Private, blame)
-				}
-			}
-		default:
-			log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
-		}
-	}
+	s.handleHook(w, github.WebHookType(r), payload)
 	io.WriteString(w, "{}")
+}
+
+// handleHook handles a validated github webhook.
+func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
+	if t == "ping" {
+		return
+	}
+	event, err := github.ParseWebHook(t, payload)
+	if err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		log.Printf("- invalid payload")
+		return
+	}
+	// Process the rest asynchronously so the hook doesn't take too long.
+	switch event := event.(type) {
+	case *github.CommitCommentEvent:
+		// https://developer.github.com/v3/activity/events/types/#commitcommentevent
+		if s.isSuperUser(*event.Sender.Login) && strings.HasPrefix(*event.Comment.Body, "gohci:") {
+			s.runCheckAsync(*event.Repo.FullName, *event.Comment.CommitID, *event.Repo.Private, nil)
+		}
+
+	case *github.IssueCommentEvent:
+		// We'd need the PR's commit head but it is not in the webhook payload.
+		// This means we'd require read access to the issues, which the OAuth
+		// token shouldn't have. This is because there is no read access to the
+		// issue without write access.
+		log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
+
+	case *github.PullRequestEvent:
+		log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.ID, *event.Sender.Login, *event.Action)
+		if *event.Action != "opened" && *event.Action != "synchronized" {
+			log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
+		} else if (!s.c.RunForPRsFromFork && *event.Repo.FullName != *event.PullRequest.Head.Repo.FullName) && !s.isSuperUser(*event.Sender.Login) {
+			// A PR from a fork and these are not allowed AND not a super user.
+			log.Printf("- ignoring PR from forked repo %q", *event.PullRequest.Head.Repo.FullName)
+		} else {
+			s.runCheckAsync(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private, nil)
+		}
+
+	case *github.PushEvent:
+		if event.HeadCommit == nil {
+			log.Printf("- Push %s %s <deleted>", *event.Repo.FullName, *event.Ref)
+		} else {
+			log.Printf("- Push %s %s %s", *event.Repo.FullName, *event.Ref, *event.HeadCommit.ID)
+			// TODO(maruel): Potentially leverage event.Repo.DefaultBranch or
+			// event.Repo.MasterBranch?
+			if !strings.HasPrefix(*event.Ref, "refs/heads/") {
+				log.Printf("- ignoring branch %q for push", *event.Ref)
+			} else {
+				var blame []string
+				if *event.Ref == "refs/heads/master" {
+					author := *event.HeadCommit.Author.Login
+					committer := *event.HeadCommit.Committer.Login
+					if author != committer {
+						blame = []string{author, committer}
+					} else {
+						blame = []string{author}
+					}
+				}
+				s.runCheckAsync(*event.Repo.FullName, *event.HeadCommit.ID, *event.Repo.Private, blame)
+			}
+		}
+	default:
+		log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
+	}
 }
 
 // runCheckAsync immediately add the status that the test run is pending and
@@ -493,7 +504,7 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 		Description: github.String(gistDesc + suffix),
 		Public:      github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
-			"setup-0-metadata": github.GistFile{Content: github.String(metadata(commit, s.gopath) + "\nCommands to be run:\n" + s.cmds)},
+			"setup-0-metadata": {Content: github.String(metadata(commit, s.gopath) + "\nCommands to be run:\n" + s.cmds)},
 		},
 	}
 	gist, _, err := s.client.Gists.Create(gist)
@@ -508,11 +519,43 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 	status.TargetURL = gist.HTMLURL
 	status.Description = github.String(statusDesc + suffix)
 	parts := strings.SplitN(repo, "/", 2)
-	if _, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status); err != nil {
+	orgName := parts[0]
+	repoName := parts[1]
+	if _, _, err = s.client.Repositories.CreateStatus(orgName, repoName, commit, status); err != nil {
 		log.Printf("- Failed to update status: %v", err)
 		return
 	}
 
+	failed := s.runCheckSyncLoop(repo, commit, orgName, repoName, suffix, statusDesc, gistDesc, total, useSSH, gist, status)
+
+	// This requires OAuth scope 'public_repo' or 'repo'. The problem is that
+	// this gives full write access, not just issue creation and this is
+	// problematic with the current security design of this project. Leave the
+	// code there as this is harmless and still work is people do not care about
+	// security.
+	if failed && len(blame) != 0 {
+		title := fmt.Sprintf("Build %q failed on %s", s.c.Name, commit)
+		log.Printf("- Failed: %s", title)
+		log.Printf("- Blame: %v", blame)
+		// https://developer.github.com/v3/issues/#create-an-issue
+		issue := github.IssueRequest{
+			Title: &title,
+			// TODO(maruel): Add more than just the URL but that's a start.
+			Body:      gist.HTMLURL,
+			Assignees: &blame,
+		}
+		if issue, _, err := s.client.Issues.Create(orgName, repoName, &issue); err != nil {
+			log.Printf("- failed to create issue: %v", err)
+		} else {
+			log.Printf("- created issue #%d", *issue.ID)
+		}
+	}
+	log.Printf("- testing done: https://github.com/%s/commit/%s", repo, commit[:12])
+}
+
+// runCheckSyncLoop is the inner loop of runCheckSync. It updates gist as the
+// checks are progressing.
+func (s *server) runCheckSyncLoop(repo, commit, orgName, repoName, suffix, statusDesc, gistDesc string, total int, useSSH bool, gist *github.Gist, status *github.RepoStatus) bool {
 	start := time.Now()
 	results := make(chan file)
 	s.wg.Add(1)
@@ -528,11 +571,11 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 	for {
 		select {
 		case <-delay:
-			if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
+			if _, _, err := s.client.Gists.Edit(*gist.ID, gist); err != nil {
 				log.Printf("- failed to update gist: %v", err)
 			}
 			gist.Files = map[github.GistFilename]github.GistFile{}
-			if _, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status); err != nil {
+			if _, _, err := s.client.Repositories.CreateStatus(orgName, repoName, commit, status); err != nil {
 				log.Printf("- failed to update status: %v", err)
 			}
 			delay = nil
@@ -540,15 +583,15 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 		case r, ok := <-results:
 			if !ok {
 				if delay != nil {
-					if _, _, err = s.client.Gists.Edit(*gist.ID, gist); err != nil {
+					if _, _, err := s.client.Gists.Edit(*gist.ID, gist); err != nil {
 						log.Printf("- failed to update gist: %v", err)
 					}
 					gist.Files = map[github.GistFilename]github.GistFile{}
-					if _, _, err = s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status); err != nil {
+					if _, _, err := s.client.Repositories.CreateStatus(orgName, repoName, commit, status); err != nil {
 						log.Printf("- failed to update status: %v", err)
 					}
 				}
-				goto done
+				return failed
 			}
 
 			// https://developer.github.com/v3/gists/#edit-a-gist
@@ -581,136 +624,39 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 			i++
 		}
 	}
-done:
-	// This requires OAuth scope 'public_repo' or 'repo'. The problem is that
-	// this gives full write access, not just issue creation and this is
-	// problematic with the current security design of this project. Leave the
-	// code there as this is harmless and still work is people do not care about
-	// security.
-	if failed && len(blame) != 0 {
-		title := fmt.Sprintf("Build %q failed on %s", s.c.Name, commit)
-		log.Printf("- Failed: %s", title)
-		log.Printf("- Blame: %v", blame)
-		// https://developer.github.com/v3/issues/#create-an-issue
-		issue := github.IssueRequest{
-			Title: &title,
-			// TODO(maruel): Add more than just the URL but that's a start.
-			Body:      gist.HTMLURL,
-			Assignees: &blame,
-		}
-		if issue, _, err := s.client.Issues.Create(parts[0], parts[1], &issue); err != nil {
-			log.Printf("- failed to create issue: %v", err)
-		} else {
-			log.Printf("- created issue #%d", *issue.ID)
-		}
-	}
-	log.Printf("- testing done: https://github.com/%s/commit/%s", repo, commit[:12])
 }
 
-func mainImpl() error {
-	start = time.Now()
-	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'maruel/gohci'")
-	commit := flag.String("commit", "", "commit SHA1 to test and update; will only update status on github if not 'HEAD'")
-	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS; only necessary when testing")
-	update := flag.Bool("update", false, "when coupled with -test and -commit, update the remote repository")
-	flag.Parse()
-	if runtime.GOOS != "windows" {
-		log.SetFlags(0)
-	}
-	if len(*test) == 0 {
-		if len(*commit) != 0 {
-			return errors.New("-commit doesn't make sense without -test")
-		}
-		if *useSSH {
-			return errors.New("-usessh doesn't make sense without -test")
-		}
-		if *update {
-			return errors.New("-update can only be used with -test")
-		}
-	} else {
-		if strings.HasPrefix(*test, "github.com/") {
-			return errors.New("don't prefix -test value with 'github.com/', it is already assumed")
-		}
-		if len(*commit) == 0 {
-			*commit = "HEAD"
-		}
-	}
-	fileName := "gohci.yml"
-	c, err := loadConfig(fileName)
-	if err != nil {
-		return err
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	gopath := filepath.Join(wd, "go")
-	// GOPATH may not be set especially when running from systemd, so use the
-	// local GOPATH to install gt. This is safer as this doesn't modify the host
-	// environment.
-	os.Setenv("GOPATH", gopath)
-	os.Setenv("PATH", filepath.Join(gopath, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
-	hasTest := false
-	for _, cmd := range c.Checks {
-		if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
-			hasTest = true
-			break
-		}
-	}
-	if hasTest {
-		stdout, useGT := run(wd, "go", "get", "rsc.io/gt")
-		if useGT {
-			log.Print("Using gt")
-			os.Setenv("CACHE", gopath)
-			for i, cmd := range c.Checks {
-				if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
-					cmd[1] = "gt"
-					c.Checks[i] = cmd[1:]
+// runLocal runs the checks run.
+func runLocal(s *server, c *config, gopath, commit, test string, update, useSSH bool) error {
+	if !update {
+		results := make(chan file)
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range results {
+				if !i.success {
+					i.name += " (failed)"
 				}
+				fmt.Printf("--- %s\n%s", i.name, i.content)
 			}
-		} else {
-			log.Print(stdout)
-		}
+		}()
+		fmt.Printf("--- setup-0-metadata\n%s", metadata(commit, gopath))
+		success := runChecks(c.Checks, test, c.AltPath, useSSH, commit, gopath, results)
+		close(results)
+		wg.Wait()
+		_, err := fmt.Printf("\nSuccess: %t\n", success)
+		return err
 	}
-	cmds := ""
-	for i, cmd := range c.Checks {
-		if i != 0 {
-			cmds += "\n"
-		}
-		cmds += "  " + strings.Join(cmd, " ")
-	}
-	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
-	s := server{c: c, client: github.NewClient(tc), gopath: gopath, cmds: cmds}
-	if len(*test) != 0 {
-		if !*update {
-			// Only run locally.
-			results := make(chan file)
-			var wg sync.WaitGroup
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for i := range results {
-					if !i.success {
-						i.name += " (failed)"
-					}
-					fmt.Printf("--- %s\n%s", i.name, i.content)
-				}
-			}()
-			fmt.Printf("--- setup-0-metadata\n%s", metadata(*commit, gopath))
-			success := runChecks(c.Checks, *test, c.AltPath, *useSSH, *commit, gopath, results)
-			close(results)
-			wg.Wait()
-			_, err := fmt.Printf("\nSuccess: %t\n", success)
-			return err
-		}
-		s.runCheckAsync(*test, *commit, *useSSH, nil)
-		s.wg.Wait()
-		// TODO(maruel): Return any error that occured.
-		return nil
-	}
+	s.runCheckAsync(test, commit, useSSH, nil)
+	s.wg.Wait()
+	// TODO(maruel): Return any error that occurred.
+	return nil
+}
 
-	// Run the web server.
-	http.Handle("/", &s)
+// runServer runs the web server.
+func runServer(s *server, c *config, wd, fileName string) error {
+	http.Handle("/", s)
 	thisFile, err := osext.Executable()
 	if err != nil {
 		return err
@@ -751,6 +697,93 @@ func mainImpl() error {
 	// Ensures no task is running.
 	s.wg.Wait()
 	return err
+}
+
+// useGT replaces the "go test" calls with "gt".
+func useGT(c *config, wd, gopath string) {
+	hasTest := false
+	for _, cmd := range c.Checks {
+		if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
+			hasTest = true
+			break
+		}
+	}
+	if !hasTest {
+		return
+	}
+	stdout, useGT := run(wd, "go", "get", "rsc.io/gt")
+	if !useGT {
+		log.Print(stdout)
+		return
+	}
+	log.Print("Using gt")
+	os.Setenv("CACHE", gopath)
+	for i, cmd := range c.Checks {
+		if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
+			cmd[1] = "gt"
+			c.Checks[i] = cmd[1:]
+		}
+	}
+}
+
+func mainImpl() error {
+	start = time.Now()
+	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'periph/gohci'")
+	commit := flag.String("commit", "", "commit SHA1 to test and update; will only update status on github if not 'HEAD'")
+	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS; only necessary when testing")
+	update := flag.Bool("update", false, "when coupled with -test and -commit, update the remote repository")
+	flag.Parse()
+	if runtime.GOOS != "windows" {
+		log.SetFlags(0)
+	}
+	if len(*test) == 0 {
+		if len(*commit) != 0 {
+			return errors.New("-commit doesn't make sense without -test")
+		}
+		if *useSSH {
+			return errors.New("-usessh doesn't make sense without -test")
+		}
+		if *update {
+			return errors.New("-update can only be used with -test")
+		}
+	} else {
+		if strings.HasPrefix(*test, "github.com/") {
+			return errors.New("don't prefix -test value with 'github.com/', it is already assumed")
+		}
+		if len(*commit) == 0 {
+			*commit = "HEAD"
+		}
+	}
+	fileName := "gohci.yml"
+	c, err := loadConfig(fileName)
+	if err != nil {
+		return err
+	}
+	log.Printf("Config: %#v", c)
+	wd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	gopath := filepath.Join(wd, "go")
+	// GOPATH may not be set especially when running from systemd, so use the
+	// local GOPATH to install gt. This is safer as this doesn't modify the host
+	// environment.
+	os.Setenv("GOPATH", gopath)
+	os.Setenv("PATH", filepath.Join(gopath, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
+	useGT(c, wd, gopath)
+	cmds := ""
+	for i, cmd := range c.Checks {
+		if i != 0 {
+			cmds += "\n"
+		}
+		cmds += "  " + strings.Join(cmd, " ")
+	}
+	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
+	s := &server{c: c, client: github.NewClient(tc), gopath: gopath, cmds: cmds}
+	if len(*test) != 0 {
+		return runLocal(s, c, gopath, *commit, *test, *update, *useSSH)
+	}
+	return runServer(s, c, wd, fileName)
 }
 
 func main() {
