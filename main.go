@@ -464,7 +464,7 @@ func (s *server) runCheckAsync(repo, commit string, useSSH bool, blame []string)
 	log.Printf("- Enqueuing test for %s at %s", repo, commit)
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
-		State:       github.String("failure"),
+		State:       github.String("pending"),
 		Description: github.String(fmt.Sprintf("Tests pending (0/%d)", len(s.c.Checks)+2)),
 		Context:     &s.c.Name,
 	}
