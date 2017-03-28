@@ -601,6 +601,7 @@ func (s *server) runCheckSyncLoop(repo, commit, orgName, repoName, suffix, statu
 			if !r.success {
 				r.name += " (failed)"
 				failed = true
+				status.State = github.String("failure")
 			}
 			r.name += " in " + roundTime(r.d).String()
 			suffix = ""
