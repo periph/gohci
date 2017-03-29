@@ -44,6 +44,10 @@ import (
 
 var start time.Time
 
+// gohciBranch is a git branch name that doens't have an high likelihood of
+// conflicting.
+const gohciBranch = "_gohci"
+
 type config struct {
 	Port              int        // TCP port number for HTTP server.
 	WebHookSecret     string     // https://developer.github.com/webhooks/
@@ -300,31 +304,41 @@ func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit, g
 	}
 
 	start = time.Now()
-	// go get will try to pull and will complain if the checkout is not on a
-	// branch.
-	stdout, ok := run(repoPath, "git", "checkout", "--quiet", "-B", "test", commit)
-	setupGet := setupWorkResult{stdout, ok}
-	if ok {
-		stdout, ok = run(repoPath, "go", "get", "-v", "-d", "-t", "./...")
+	setupCmds := [][]string{
+		// "go get" will try to pull and will complain if the checkout is not on a
+		// branch.
+		{"git", "checkout", "--quiet", "-B", gohciBranch, commit},
+		// "git pull --ff-only" will fail if there's no tracking branch, and
+		// it occasionally happen.
+		{"git", "checkout", "--quiet", "-B", gohciBranch + "2", gohciBranch},
+		// Pull add necessary dependencies.
+		{"go", "get", "-v", "-d", "-t", "./..."},
+		// Precompilation has a dramatic effect on a Raspberry Pi. YMMV.
+		{"go", "test", "-i", "./..."},
+	}
+	setupGet := file{name: "setup-2-get", success: true}
+	for _, c := range setupCmds {
+		stdout := ""
+		stdout, setupGet.success = run(repoPath, c...)
 		setupGet.content += stdout
-		if ok {
-			// Precompilation has a dramatic effect on a Raspberry Pi.
-			stdout, ok = run(repoPath, "go", "test", "-i", "./...")
-			setupGet.content += stdout
+		if !setupGet.success {
+			break
 		}
 	}
-	results <- file{"setup-2-get", setupGet.content, ok, time.Since(start)}
-	setupGet.content = ""
-	if ok {
-		// Finally run the checks!
-		for i, cmd := range cmds {
-			start = time.Now()
-			stdout, ok2 := run(repoPath, cmd...)
-			results <- file{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
-			if !ok2 {
-				// Still run the other tests.
-				ok = false
-			}
+	setupGet.d = time.Since(start)
+	results <- setupGet
+	if !setupGet.success {
+		return false
+	}
+	ok := true
+	// Finally run the checks!
+	for i, cmd := range cmds {
+		start = time.Now()
+		stdout, ok2 := run(repoPath, cmd...)
+		results <- file{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
+		if !ok2 {
+			// Still run the other tests.
+			ok = false
 		}
 	}
 	return ok
