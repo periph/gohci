@@ -183,7 +183,7 @@ func metadata(commit, gopath string) string {
 // is checked out.
 func cloneOrFetch(repoPath, cloneURL string) (string, bool) {
 	if _, err := os.Stat(repoPath); err == nil {
-		return run(repoPath, "git", "fetch", "--prune", "--quiet")
+		return run(repoPath, "git", "fetch", "--prune", "--quiet", "origin")
 	} else if !os.IsNotExist(err) {
 		return "<failure>\n" + err.Error() + "\n", false
 	}
