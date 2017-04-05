@@ -78,6 +78,8 @@ It hardly can get any simpler:
 
 ## Installation
 
+**`gohci` requires Go 1.8**
+
 Install and create the default `gohci.yml`:
 
 ```

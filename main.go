@@ -14,6 +14,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -36,12 +37,12 @@ import (
 	fsnotify "gopkg.in/fsnotify.v1"
 	yaml "gopkg.in/yaml.v1"
 
-	"github.com/bugsnag/osext"
 	"github.com/google/go-github/github"
 	"github.com/periph/gohci/lib"
 	"golang.org/x/oauth2"
 )
 
+var ctx = context.Background()
 var start time.Time
 
 // gohciBranch is a git branch name that doens't have an high likelihood of
@@ -483,7 +484,7 @@ func (s *server) runCheckAsync(repo, commit string, useSSH bool, blame []string)
 		Context:     &s.c.Name,
 	}
 	parts := strings.SplitN(repo, "/", 2)
-	if _, _, err := s.client.Repositories.CreateStatus(parts[0], parts[1], commit, status); err != nil {
+	if _, _, err := s.client.Repositories.CreateStatus(ctx, parts[0], parts[1], commit, status); err != nil {
 		// Don't bother running the tests.
 		log.Printf("- Failed to create status: %v", err)
 		return
@@ -521,7 +522,7 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 			"setup-0-metadata": {Content: github.String(metadata(commit, s.gopath) + "\nCommands to be run:\n" + s.cmds)},
 		},
 	}
-	gist, _, err := s.client.Gists.Create(gist)
+	gist, _, err := s.client.Gists.Create(ctx, gist)
 	if err != nil {
 		// Don't bother running the tests.
 		log.Printf("- Failed to create gist: %v", err)
@@ -535,7 +536,7 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 	parts := strings.SplitN(repo, "/", 2)
 	orgName := parts[0]
 	repoName := parts[1]
-	if _, _, err = s.client.Repositories.CreateStatus(orgName, repoName, commit, status); err != nil {
+	if _, _, err = s.client.Repositories.CreateStatus(ctx, orgName, repoName, commit, status); err != nil {
 		log.Printf("- Failed to update status: %v", err)
 		return
 	}
@@ -558,7 +559,7 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 			Body:      gist.HTMLURL,
 			Assignees: &blame,
 		}
-		if issue, _, err := s.client.Issues.Create(orgName, repoName, &issue); err != nil {
+		if issue, _, err := s.client.Issues.Create(ctx, orgName, repoName, &issue); err != nil {
 			log.Printf("- failed to create issue: %v", err)
 		} else {
 			log.Printf("- created issue #%d", *issue.ID)
@@ -585,11 +586,11 @@ func (s *server) runCheckSyncLoop(repo, commit, orgName, repoName, suffix, statu
 	for {
 		select {
 		case <-delay:
-			if _, _, err := s.client.Gists.Edit(*gist.ID, gist); err != nil {
+			if _, _, err := s.client.Gists.Edit(ctx, *gist.ID, gist); err != nil {
 				log.Printf("- failed to update gist: %v", err)
 			}
 			gist.Files = map[github.GistFilename]github.GistFile{}
-			if _, _, err := s.client.Repositories.CreateStatus(orgName, repoName, commit, status); err != nil {
+			if _, _, err := s.client.Repositories.CreateStatus(ctx, orgName, repoName, commit, status); err != nil {
 				log.Printf("- failed to update status: %v", err)
 			}
 			delay = nil
@@ -597,11 +598,11 @@ func (s *server) runCheckSyncLoop(repo, commit, orgName, repoName, suffix, statu
 		case r, ok := <-results:
 			if !ok {
 				if delay != nil {
-					if _, _, err := s.client.Gists.Edit(*gist.ID, gist); err != nil {
+					if _, _, err := s.client.Gists.Edit(ctx, *gist.ID, gist); err != nil {
 						log.Printf("- failed to update gist: %v", err)
 					}
 					gist.Files = map[github.GistFilename]github.GistFile{}
-					if _, _, err := s.client.Repositories.CreateStatus(orgName, repoName, commit, status); err != nil {
+					if _, _, err := s.client.Repositories.CreateStatus(ctx, orgName, repoName, commit, status); err != nil {
 						log.Printf("- failed to update status: %v", err)
 					}
 				}
@@ -672,7 +673,7 @@ func runLocal(s *server, c *config, gopath, commit, test string, update, useSSH 
 // runServer runs the web server.
 func runServer(s *server, c *config, wd, fileName string) error {
 	http.Handle("/", s)
-	thisFile, err := osext.Executable()
+	thisFile, err := os.Executable()
 	if err != nil {
 		return err
 	}
