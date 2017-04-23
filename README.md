@@ -137,7 +137,8 @@ Visit to `github.com/user/repo/settings/hooks` and create a new webhook.
   `https://1.2.3.4/github/repoA`.
 - Type a random string, that you will put in `WebHookSecret` in `gohci.yml`.
 - Click `Let me select individual events` and check: `Commit comment`, `Issue
-  Comment`, `Pull request`, `Pull request review comment` and `Push`.
+  Comment`, `Pull request`, `Pull request review`, `Pull request review comment`
+  and `Push`.
 
 
 ### systemd: Running automatically and auto-update
