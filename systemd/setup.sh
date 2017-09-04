@@ -5,7 +5,9 @@
 
 # Run as:
 #   curl -sSL https://raw.githubusercontent.com/periph/gohci/master/systemd/setup.sh | bash
-
+#
+# For distros that require access to /dev/mem (anything but Raspbian), User= and
+# Group= in gohci.service need to be changed to root.
 
 set -eu
 
@@ -29,28 +31,15 @@ sudo tee /etc/systemd/system/gohci${SUFFIX}.service << EOF
 Description=Go on Hardware CI
 Wants=network-online.target
 After=network-online.target
-
 [Service]
 User=${USER}
 Group=${USER}
-# Grant unconditional access to physical memory. This is as good as giving root
-# but this makes file ownership simpler.
-PermissionsStartOnly=true
-ExecStartPre=chown root.${USER} /dev/mem && chmod g+rw /dev/mem
 KillMode=mixed
 Restart=always
 TimeoutStopSec=20s
 ExecStart=/home/${USER}/go/bin/gohci
 WorkingDirectory=/home/${USER}/gohci${SUFFIX}
-# To use port 80 not as root:
-#   Systemd 229:
-#     AmbientCapabilities=CAP_NET_BIND_SERVICE
-#   Systemd 228 and below:
-#     SecureBits=keep-caps
-#     Capabilities=cap_net_bind_service+pie
-# - Normal installation of a recent Go version in /usr/local/go:
 Environment=PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
 [Install]
 WantedBy=default.target
 EOF
