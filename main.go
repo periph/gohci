@@ -35,7 +35,7 @@ import (
 	"unicode/utf8"
 
 	fsnotify "gopkg.in/fsnotify.v1"
-	yaml "gopkg.in/yaml.v1"
+	yaml "gopkg.in/yaml.v2"
 
 	"github.com/google/go-github/github"
 	"github.com/periph/gohci/lib"
