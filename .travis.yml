@@ -2,4 +2,7 @@ language: go
 sudo: false
 go_import_path: periph.io/x/gohci
 go:
-  - 1.8.x
+  - 1.x
+
+script:
+  - go test . ./lib
