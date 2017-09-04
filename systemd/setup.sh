@@ -18,6 +18,7 @@ fi
 
 SUFFIX=$1
 
+go get -u -v periph.io/x/gohci
 
 mkdir /home/${USER}/gohci${SUFFIX}
 
@@ -84,6 +85,5 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable gohci_update.timer
-sudo systemctl start gohci_update.timer
 sudo systemctl enable gohci${SUFFIX}.service
 sudo systemctl start gohci${SUFFIX}.service
