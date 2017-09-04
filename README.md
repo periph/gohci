@@ -83,7 +83,7 @@ It hardly can get any simpler:
 Install and create the default `gohci.yml`:
 
 ```
-go get github.com/periph/gohci
+go get periph.io/x/gohci
 gohci
 ```
 
@@ -188,7 +188,7 @@ Auto-update can be done via the task scheduler. The following command will
 auto-update `gohci` every 10 minutes:
 
 ```
-schtasks /create /tn "Update gohci" /tr "go get -v -u github.com/periph/gohci" /sc minute /mo 10
+schtasks /create /tn "Update gohci" /tr "go get -v -u periph.io/x/gohci" /sc minute /mo 10
 ```
 
 The task should show up with: `schtasks /query /fo table | more` or navigating

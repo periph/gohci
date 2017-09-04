@@ -38,8 +38,8 @@ import (
 	yaml "gopkg.in/yaml.v2"
 
 	"github.com/google/go-github/github"
-	"github.com/periph/gohci/lib"
 	"golang.org/x/oauth2"
+	"periph.io/x/gohci/lib"
 )
 
 var ctx = context.Background()

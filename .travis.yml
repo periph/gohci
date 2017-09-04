@@ -1,0 +1,5 @@
+language: go
+sudo: false
+go_import_path: periph.io/x/gohci
+go:
+  - 1.8.x
