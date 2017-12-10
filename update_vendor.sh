@@ -5,11 +5,10 @@
 
 set -eu
 
-git rm -rf Gopkg.* vendor
 go get -v github.com/golang/dep
-dep init
+dep ensure -update
 
-# Trim oogle.golang.org dependency. 
+# Trim google.golang.org dependency. 
 rm vendor/golang.org/x/oauth2/client_appengine.go
 rm -rf vendor/google.golang.org/
 # TODO(maruel): Update Gopkg.lock to remove reference to appengine.
