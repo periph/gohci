@@ -182,11 +182,18 @@ func metadata(commit, gopath string) string {
 
 // cloneOrFetch is meant to be used on the primary repository, making sure it
 // is checked out.
-func cloneOrFetch(repoPath, cloneURL string) (string, bool) {
+func cloneOrFetch(repoPath, cloneURL string, pullID int) (string, bool) {
 	if _, err := os.Stat(repoPath); err == nil {
+		if pullID != 0 {
+			return run(repoPath, "git", "fetch", "--prune", "--quiet", "origin", fmt.Sprintf("pull/%d/head", pullID))
+		}
 		return run(repoPath, "git", "fetch", "--prune", "--quiet", "origin")
 	} else if !os.IsNotExist(err) {
 		return "<failure>\n" + err.Error() + "\n", false
+	}
+	if pullID != 0 {
+		// TODO(maruel): Not sure this works.
+		return run(filepath.Dir(repoPath), "git", "clone", "--quiet", cloneURL, "-b", fmt.Sprintf("pull/%d/head", pullID))
 	}
 	return run(filepath.Dir(repoPath), "git", "clone", "--quiet", cloneURL)
 }
@@ -225,7 +232,7 @@ type setupWorkResult struct {
 // are already synced to HEAD.
 //
 // cloneURL is fetched into repoPath.
-func syncParallel(root, cloneURL, repoPath string, c chan<- setupWorkResult) {
+func syncParallel(root, cloneURL, repoPath string, pullID int, c chan<- setupWorkResult) {
 	// git clone / go get will have a race condition if the directory doesn't
 	// exist.
 	up := filepath.Dir(repoPath)
@@ -239,7 +246,7 @@ func syncParallel(root, cloneURL, repoPath string, c chan<- setupWorkResult) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		stdout, ok := cloneOrFetch(repoPath, cloneURL)
+		stdout, ok := cloneOrFetch(repoPath, cloneURL, pullID)
 		c <- setupWorkResult{stdout, ok}
 	}()
 	// Sync all the repositories concurrently.
@@ -273,7 +280,7 @@ func syncParallel(root, cloneURL, repoPath string, c chan<- setupWorkResult) {
 //
 // It aggressively concurrently fetches all repositories in `gopath` to
 // accelerate the processing.
-func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit, gopath string, results chan<- file) bool {
+func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit string, pullID int, gopath string, results chan<- file) bool {
 	repoURL := "github.com/" + repoName
 	src := filepath.Join(gopath, "src")
 	c := make(chan setupWorkResult)
@@ -290,7 +297,7 @@ func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit, g
 	start := time.Now()
 	go func() {
 		defer close(c)
-		syncParallel(src, cloneURL, repoPath, c)
+		syncParallel(src, cloneURL, repoPath, pullID, c)
 	}()
 	setupSync := setupWorkResult{"", true}
 	for i := range c {
@@ -421,7 +428,8 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 	case *github.CommitCommentEvent:
 		// https://developer.github.com/v3/activity/events/types/#commitcommentevent
 		if s.isSuperUser(*event.Sender.Login) && strings.HasPrefix(*event.Comment.Body, "gohci:") {
-			s.runCheckAsync(*event.Repo.FullName, *event.Comment.CommitID, *event.Repo.Private, nil)
+			// TODO(maruel): The commit could be on a branch never fetched?
+			s.runCheckAsync(*event.Repo.FullName, *event.Comment.CommitID, *event.Repo.Private, nil, 0)
 		}
 
 	case *github.IssueCommentEvent:
@@ -432,14 +440,23 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 		log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
 
 	case *github.PullRequestEvent:
-		log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.ID, *event.Sender.Login, *event.Action)
-		if *event.Action != "opened" && *event.Action != "synchronized" {
+		log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.Number, *event.Sender.Login, *event.Action)
+		switch *event.Action {
+		case "opened", "synchronized":
+			if (!s.c.RunForPRsFromFork && *event.Repo.FullName != *event.PullRequest.Head.Repo.FullName) && !s.isSuperUser(*event.Sender.Login) {
+				// A PR from a fork and these are not allowed AND not a super user.
+				// TODO(maruel): If a reviewer is set, it has to be set by a repository
+				// owner (?) If so, then it would be safe to run.
+				log.Printf("- ignoring PR from forked repo %q", *event.PullRequest.Head.Repo.FullName)
+			} else {
+				// For PRs, the commit has to be fetched manually.
+				s.runCheckAsync(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private, nil, *event.PullRequest.Number)
+			}
+		case "pull_request_review_comment":
+			// TODO(maruel): Run for *event.Comment.Body == "gohci"
 			log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
-		} else if (!s.c.RunForPRsFromFork && *event.Repo.FullName != *event.PullRequest.Head.Repo.FullName) && !s.isSuperUser(*event.Sender.Login) {
-			// A PR from a fork and these are not allowed AND not a super user.
-			log.Printf("- ignoring PR from forked repo %q", *event.PullRequest.Head.Repo.FullName)
-		} else {
-			s.runCheckAsync(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private, nil)
+		default:
+			log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
 		}
 
 	case *github.PushEvent:
@@ -462,7 +479,7 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 						blame = []string{author}
 					}
 				}
-				s.runCheckAsync(*event.Repo.FullName, *event.HeadCommit.ID, *event.Repo.Private, blame)
+				s.runCheckAsync(*event.Repo.FullName, *event.HeadCommit.ID, *event.Repo.Private, blame, 0)
 			}
 		}
 	default:
@@ -473,7 +490,7 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 // runCheckAsync immediately add the status that the test run is pending and
 // add the run in the queue. Ensures that the service doesn't restart until the
 // task is done.
-func (s *server) runCheckAsync(repo, commit string, useSSH bool, blame []string) {
+func (s *server) runCheckAsync(repo, commit string, useSSH bool, blame []string, pullID int) {
 	s.wg.Add(1)
 	defer s.wg.Done()
 	log.Printf("- Enqueuing test for %s at %s", repo, commit)
@@ -493,7 +510,7 @@ func (s *server) runCheckAsync(repo, commit string, useSSH bool, blame []string)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.runCheckSync(repo, commit, useSSH, status, blame)
+		s.runCheckSync(repo, commit, useSSH, status, blame, pullID)
 	}()
 }
 
@@ -506,7 +523,7 @@ func (s *server) runCheckAsync(repo, commit string, useSSH bool, blame []string)
 // of github handles. These strings are different from what appears in the git
 // commit log. Non-team members cannot be assigned an issue, in this case the
 // API will silently drop them.
-func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.RepoStatus, blame []string) {
+func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.RepoStatus, blame []string, pullID int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	log.Printf("- Running test for %s at %s", repo, commit)
@@ -514,7 +531,12 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 	suffix := fmt.Sprintf(" (0/%d)", total)
 	// https://developer.github.com/v3/gists/#create-a-gist
 	// It is still accessible via the URL without authentication.
-	gistDesc := fmt.Sprintf("%s for https://github.com/%s/commit/%s", s.c.Name, repo, commit[:12])
+	gistDesc := ""
+	if pullID != 0 {
+		gistDesc = fmt.Sprintf("%s for https://github.com/%s/pull/%d at https://github.com/%s/commit/%s", s.c.Name, repo, pullID, repo, commit[:12])
+	} else {
+		gistDesc = fmt.Sprintf("%s for https://github.com/%s/commit/%s", s.c.Name, repo, commit[:12])
+	}
 	gist := &github.Gist{
 		Description: github.String(gistDesc + suffix),
 		Public:      github.Bool(false),
@@ -541,7 +563,7 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 		return
 	}
 
-	failed := s.runCheckSyncLoop(repo, commit, orgName, repoName, suffix, statusDesc, gistDesc, total, useSSH, gist, status)
+	failed := s.runCheckSyncLoop(repo, commit, pullID, orgName, repoName, suffix, statusDesc, gistDesc, total, useSSH, gist, status)
 
 	// This requires OAuth scope 'public_repo' or 'repo'. The problem is that
 	// this gives full write access, not just issue creation and this is
@@ -570,13 +592,13 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 
 // runCheckSyncLoop is the inner loop of runCheckSync. It updates gist as the
 // checks are progressing.
-func (s *server) runCheckSyncLoop(repo, commit, orgName, repoName, suffix, statusDesc, gistDesc string, total int, useSSH bool, gist *github.Gist, status *github.RepoStatus) bool {
+func (s *server) runCheckSyncLoop(repo, commit string, pullID int, orgName, repoName, suffix, statusDesc, gistDesc string, total int, useSSH bool, gist *github.Gist, status *github.RepoStatus) bool {
 	start := time.Now()
 	results := make(chan file)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		runChecks(s.c.Checks, repo, s.c.AltPath, useSSH, commit, s.gopath, results)
+		runChecks(s.c.Checks, repo, s.c.AltPath, useSSH, commit, pullID, s.gopath, results)
 		close(results)
 	}()
 
@@ -658,13 +680,13 @@ func runLocal(s *server, c *config, gopath, commit, test string, update, useSSH 
 			}
 		}()
 		fmt.Printf("--- setup-0-metadata\n%s", metadata(commit, gopath))
-		success := runChecks(c.Checks, test, c.AltPath, useSSH, commit, gopath, results)
+		success := runChecks(c.Checks, test, c.AltPath, useSSH, commit, 0, gopath, results)
 		close(results)
 		wg.Wait()
 		_, err := fmt.Printf("\nSuccess: %t\n", success)
 		return err
 	}
-	s.runCheckAsync(test, commit, useSSH, nil)
+	s.runCheckAsync(test, commit, useSSH, nil, 0)
 	s.wg.Wait()
 	// TODO(maruel): Return any error that occurred.
 	return nil
