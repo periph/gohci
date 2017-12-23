@@ -101,8 +101,6 @@ name: ogre
 # Alternative path to use to checkout the git repository, can be an alternative
 # name like "golang.org/x/tools".
 alt_path: ""
-# Accepts PRs from forks:
-runforprsfromfork: false
 # Users that can trigger a job on any commit by commenting "gohci: run".
 superusers: []
 # Commands to run:
@@ -138,8 +136,8 @@ Visit to `github.com/user/repo/settings/hooks` and create a new webhook.
 - Use your worker IP address or hostname as the hook URL,
   `https://1.2.3.4/github/repoA`.
 - Type a random string, that you will put in `WebHookSecret` in `gohci.yml`.
-- Click `Let me select individual events` and check: `Commit comment`, `Pull
-  request`, `Pull request review comment` and `Push`.
+- Click `Let me select individual events` and check: `Commit comment`, `Issue
+  Comment`, `Pull request`, `Pull request review comment` and `Push`.
 
 
 ### systemd: Running automatically and auto-update

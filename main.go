@@ -55,7 +55,6 @@ type config struct {
 	Oauth2AccessToken string     // https://github.com/settings/tokens, check "repo:status" and "gist"
 	Name              string     // Display name to use in the status report on Github.
 	AltPath           string     // Alternative package path to use. Defaults to the actual path.
-	RunForPRsFromFork bool       // Runs PRs coming from a fork. This means your worker will run uncontrolled code.
 	SuperUsers        []string   // List of github accounts that can trigger a run. In practice any user with write access is a super user but OAuth2 tokens with limited scopes cannot get this information.
 	Checks            [][]string // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
@@ -74,7 +73,6 @@ func loadConfig(fileName string) (*config, error) {
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
 		Name:              hostname,
 		AltPath:           "",
-		RunForPRsFromFork: false,
 		SuperUsers:        nil,
 		Checks:            nil,
 	}
@@ -216,6 +214,33 @@ func (j *jobRequest) repo() string {
 	return j.orgName + "/" + j.repoName
 }
 
+func (j *jobRequest) cloneURL() string {
+	if j.useSSH {
+		return "git@github.com:" + j.repo()
+	}
+	return "https://github.com/" + j.repo()
+}
+
+// commitHashForPR tries to get the HEAD commit for the PR #.
+func (j *jobRequest) commitHashForPR() bool {
+	if j.pullID == 0 {
+		return false
+	}
+	stdout, ok := run(".", "git", "ls-remote", j.cloneURL())
+	if !ok {
+		return false
+	}
+	p := fmt.Sprintf("refs/pull/%d/head", j.pullID)
+	for _, l := range strings.Split(stdout, "\n") {
+		if strings.HasSuffix(l, p) {
+			j.commitHash = strings.SplitN(l, "\t", 2)[0]
+			log.Printf("  Found %s for PR #%d", j.commitHash, j.pullID)
+			return true
+		}
+	}
+	return false
+}
+
 // fetchDetails is the details to run a verification job.
 type fetchDetails struct {
 	repoPath   string // repoPath is the absolute path to the repository
@@ -229,6 +254,7 @@ type fetchDetails struct {
 func (f *fetchDetails) cloneOrFetch() (string, bool) {
 	if _, err := os.Stat(f.repoPath); err == nil {
 		if f.pullID != 0 {
+			// For PRs, the commit has to be fetched manually.
 			return run(f.repoPath, "git", "fetch", "--prune", "--quiet", "origin", fmt.Sprintf("pull/%d/head", f.pullID))
 		}
 		return run(f.repoPath, "git", "fetch", "--prune", "--quiet", "origin")
@@ -306,18 +332,14 @@ type setupWorkResult struct {
 }
 
 func makeFetchDetails(j *jobRequest, altPath string, src string) *fetchDetails {
-	repoURL := "github.com/" + j.repoName
-	cloneURL := "https://" + repoURL
-	if j.useSSH {
-		cloneURL = "git@github.com:" + j.repoName
-	}
 	repoPath := ""
 	if len(altPath) != 0 {
 		repoPath = filepath.Join(src, strings.Replace(altPath, "/", string(os.PathSeparator), -1))
 	} else {
+		repoURL := "github.com/" + j.repo()
 		repoPath = filepath.Join(src, strings.Replace(repoURL, "/", string(os.PathSeparator), -1))
 	}
-	return &fetchDetails{repoPath: repoPath, cloneURL: cloneURL, commitHash: j.commitHash, pullID: j.pullID}
+	return &fetchDetails{repoPath: repoPath, cloneURL: j.cloneURL(), commitHash: j.commitHash, pullID: j.pullID}
 }
 
 // runChecks syncs then runs the checks and returns task's results.
@@ -478,19 +500,43 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 		// This means we'd require read access to the issues, which the OAuth
 		// token shouldn't have. This is because there is no read access to the
 		// issue without write access.
-		log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
+		if event.Issue.PullRequestLinks == nil {
+			log.Printf("- ignoring issue #%d", *event.Issue.Number)
+		} else {
+			switch *event.Action {
+			case "created":
+				// || *event.Issue.AuthorAssociation == "CONTRIBUTOR"
+				if s.isSuperUser(*event.Sender.Login) && strings.TrimSpace(*event.Comment.Body) == "gohci" {
+					// The commit hash is not provided. :(
+					j := &jobRequest{
+						orgName:    *event.Repo.Owner.Login,
+						repoName:   *event.Repo.Name,
+						useSSH:     *event.Repo.Private,
+						commitHash: "",
+						pullID:     *event.Issue.Number,
+					}
+					// Immediately fetch the issue head commit inside the webhook, since
+					// it's a race condition.
+					if !j.commitHashForPR() {
+						log.Printf("- failed to get HEAD for issue #%d", *event.Issue.Number)
+					} else {
+						s.runCheckAsync(j, nil)
+					}
+				} else {
+					log.Printf("- ignoring issue #%d comment from user %q", *event.Issue.Number, *event.Sender.Login)
+				}
+			default:
+				log.Printf("- ignoring PR #%d comment", *event.Issue.Number)
+			}
+		}
 
 	case *github.PullRequestEvent:
 		log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.Number, *event.Sender.Login, *event.Action)
 		switch *event.Action {
 		case "opened", "synchronized":
-			if (!s.c.RunForPRsFromFork && *event.Repo.FullName != *event.PullRequest.Head.Repo.FullName) && !s.isSuperUser(*event.Sender.Login) {
-				// A PR from a fork and these are not allowed AND not a super user.
-				// TODO(maruel): If a reviewer is set, it has to be set by a repository
-				// owner (?) If so, then it would be safe to run.
-				log.Printf("- ignoring PR from forked repo %q", *event.PullRequest.Head.Repo.FullName)
-			} else {
-				// For PRs, the commit has to be fetched manually.
+			// TODO(maruel): If a reviewer is set, it has to be set by a repository
+			// owner (?) If so, then it would be safe to run.
+			if s.isSuperUser(*event.Sender.Login) {
 				j := &jobRequest{
 					orgName:    *event.Repo.Owner.Login,
 					repoName:   *event.Repo.Name,
@@ -499,12 +545,32 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 					pullID:     *event.PullRequest.Number,
 				}
 				s.runCheckAsync(j, nil)
+			} else {
+				log.Printf("- ignoring PR from not super user %q", *event.PullRequest.Head.Repo.FullName)
 			}
-		case "pull_request_review_comment":
-			// TODO(maruel): Run for *event.Comment.Body == "gohci"
-			log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
+		//case "pull_request_review_comment":
 		default:
 			log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
+		}
+
+	case *github.PullRequestReviewCommentEvent:
+		switch *event.Action {
+		case "created", "edited":
+			// || *event.PullRequest.AuthorAssociation == "CONTRIBUTOR"
+			if s.isSuperUser(*event.Sender.Login) && strings.TrimSpace(*event.Comment.Body) == "gohci" {
+				j := &jobRequest{
+					orgName:    *event.Repo.Owner.Login,
+					repoName:   *event.Repo.Name,
+					useSSH:     *event.Repo.Private,
+					commitHash: *event.PullRequest.Head.SHA,
+					pullID:     *event.PullRequest.Number,
+				}
+				s.runCheckAsync(j, nil)
+			} else {
+				log.Printf("- ignoring issue #%d comment from user %q", *event.PullRequest.Number, *event.Sender.Login)
+			}
+		default:
+			log.Printf("- ignoring PR #%d comment", *event.PullRequest.Number)
 		}
 
 	case *github.PushEvent:
