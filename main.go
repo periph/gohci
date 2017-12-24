@@ -533,7 +533,7 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 	case *github.PullRequestEvent:
 		log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.Number, *event.Sender.Login, *event.Action)
 		switch *event.Action {
-		case "opened", "synchronized":
+		case "opened", "synchronize":
 			// TODO(maruel): If a reviewer is set, it has to be set by a repository
 			// owner (?) If so, then it would be safe to run.
 			if s.isSuperUser(*event.Sender.Login) {
