@@ -157,11 +157,11 @@ func run(cwd string, cmd ...string) (string, bool) {
 	return fmt.Sprintf("$ %s  (exit:%d in %s)\n%s", cmds, exit, roundTime(duration), normalizeUTF8(out)), err == nil
 }
 
-// file is an item in the gist.
+// gistFile is an item in the gist.
 //
 // It represents either the stdout of a command or metadata. They are created
 // by processing fileToPush.
-type file struct {
+type gistFile struct {
 	name, content string
 	success       bool
 	d             time.Duration
@@ -180,24 +180,6 @@ func metadata(commit, gopath string) string {
 	return out
 }
 
-// cloneOrFetch is meant to be used on the primary repository, making sure it
-// is checked out.
-func cloneOrFetch(repoPath, cloneURL string, pullID int) (string, bool) {
-	if _, err := os.Stat(repoPath); err == nil {
-		if pullID != 0 {
-			return run(repoPath, "git", "fetch", "--prune", "--quiet", "origin", fmt.Sprintf("pull/%d/head", pullID))
-		}
-		return run(repoPath, "git", "fetch", "--prune", "--quiet", "origin")
-	} else if !os.IsNotExist(err) {
-		return "<failure>\n" + err.Error() + "\n", false
-	}
-	if pullID != 0 {
-		// TODO(maruel): Not sure this works.
-		return run(filepath.Dir(repoPath), "git", "clone", "--quiet", cloneURL, "-b", fmt.Sprintf("pull/%d/head", pullID))
-	}
-	return run(filepath.Dir(repoPath), "git", "clone", "--quiet", cloneURL)
-}
-
 // pullRepo tries to pull a repository if possible. If the pull failed, it
 // deletes the checkout.
 func pullRepo(repoPath string) (string, bool) {
@@ -214,12 +196,50 @@ func pullRepo(repoPath string) (string, bool) {
 	return stdout, ok
 }
 
-// setupWorkResult is metadata to add to the 'setup' pseudo-steps.
-//
-// It is used to track the work as all repositories are pulled concurrently, then used.
-type setupWorkResult struct {
-	content string
-	ok      bool
+// jobRequest is the details to run a verification job.
+type jobRequest struct {
+	orgName    string // orgName is the user part
+	repoName   string // repoName is the repo part
+	useSSH     bool   // useSSH tells to use ssh instead of https
+	commitHash string // commit hash, not a ref
+	pullID     int    // pullID is the PR ID if relevant
+}
+
+func (j *jobRequest) String() string {
+	if j.pullID != 0 {
+		return fmt.Sprintf("https://github.com/%s/pull/%d at https://github.com/%s/commit/%s", j.repo(), j.pullID, j.repo(), j.commitHash[:12])
+	}
+	return fmt.Sprintf("https://github.com/%s/commit/%s", j.repo(), j.commitHash[:12])
+}
+
+func (j *jobRequest) repo() string {
+	return j.orgName + "/" + j.repoName
+}
+
+// fetchDetails is the details to run a verification job.
+type fetchDetails struct {
+	repoPath   string // repoPath is the absolute path to the repository
+	cloneURL   string // cloneURL is the URL to clone for, either ssh or https
+	commitHash string // commit hash, not a ref
+	pullID     int    // pullID is the PR ID if relevant
+}
+
+// cloneOrFetch is meant to be used on the primary repository, making sure it
+// is checked out.
+func (f *fetchDetails) cloneOrFetch() (string, bool) {
+	if _, err := os.Stat(f.repoPath); err == nil {
+		if f.pullID != 0 {
+			return run(f.repoPath, "git", "fetch", "--prune", "--quiet", "origin", fmt.Sprintf("pull/%d/head", f.pullID))
+		}
+		return run(f.repoPath, "git", "fetch", "--prune", "--quiet", "origin")
+	} else if !os.IsNotExist(err) {
+		return "<failure>\n" + err.Error() + "\n", false
+	}
+	if f.pullID != 0 {
+		// TODO(maruel): Not sure this works.
+		return run(filepath.Dir(f.repoPath), "git", "clone", "--quiet", f.cloneURL, "-b", fmt.Sprintf("pull/%d/head", f.pullID))
+	}
+	return run(filepath.Dir(f.repoPath), "git", "clone", "--quiet", f.cloneURL)
 }
 
 // syncParallel checkouts out one repository if missing, and syncs all the
@@ -232,10 +252,10 @@ type setupWorkResult struct {
 // are already synced to HEAD.
 //
 // cloneURL is fetched into repoPath.
-func syncParallel(root, cloneURL, repoPath string, pullID int, c chan<- setupWorkResult) {
+func (f *fetchDetails) syncParallel(root string, c chan<- setupWorkResult) {
 	// git clone / go get will have a race condition if the directory doesn't
 	// exist.
-	up := filepath.Dir(repoPath)
+	up := filepath.Dir(f.repoPath)
 	err := os.MkdirAll(up, 0700)
 	log.Printf("MkdirAll(%q) -> %v", up, err)
 	if err != nil && !os.IsExist(err) {
@@ -246,7 +266,7 @@ func syncParallel(root, cloneURL, repoPath string, pullID int, c chan<- setupWor
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		stdout, ok := cloneOrFetch(repoPath, cloneURL, pullID)
+		stdout, ok := f.cloneOrFetch()
 		c <- setupWorkResult{stdout, ok}
 	}()
 	// Sync all the repositories concurrently.
@@ -254,7 +274,7 @@ func syncParallel(root, cloneURL, repoPath string, pullID int, c chan<- setupWor
 		if err != nil {
 			return err
 		}
-		if path == repoPath {
+		if path == f.repoPath {
 			// repoPath is handled specifically above.
 			return filepath.SkipDir
 		}
@@ -276,17 +296,20 @@ func syncParallel(root, cloneURL, repoPath string, pullID int, c chan<- setupWor
 	}
 }
 
-// runChecks syncs then runs the checks and returns task's results.
+// setupWorkResult is metadata to add to the 'setup' pseudo-steps.
 //
-// It aggressively concurrently fetches all repositories in `gopath` to
-// accelerate the processing.
-func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit string, pullID int, gopath string, results chan<- file) bool {
-	repoURL := "github.com/" + repoName
-	src := filepath.Join(gopath, "src")
-	c := make(chan setupWorkResult)
+// It is used to track the work as all repositories are pulled concurrently,
+// then used.
+type setupWorkResult struct {
+	content string
+	ok      bool
+}
+
+func makeFetchDetails(j *jobRequest, altPath string, src string) *fetchDetails {
+	repoURL := "github.com/" + j.repoName
 	cloneURL := "https://" + repoURL
-	if useSSH {
-		cloneURL = "git@github.com:" + repoName
+	if j.useSSH {
+		cloneURL = "git@github.com:" + j.repoName
 	}
 	repoPath := ""
 	if len(altPath) != 0 {
@@ -294,10 +317,21 @@ func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit st
 	} else {
 		repoPath = filepath.Join(src, strings.Replace(repoURL, "/", string(os.PathSeparator), -1))
 	}
+	return &fetchDetails{repoPath: repoPath, cloneURL: cloneURL, commitHash: j.commitHash, pullID: j.pullID}
+}
+
+// runChecks syncs then runs the checks and returns task's results.
+//
+// It aggressively concurrently fetches all repositories in `gopath` to
+// accelerate the processing.
+func runChecks(cmds [][]string, j *jobRequest, altPath string, gopath string, results chan<- gistFile) bool {
 	start := time.Now()
+	c := make(chan setupWorkResult)
+	src := filepath.Join(gopath, "src")
+	f := makeFetchDetails(j, altPath, src)
 	go func() {
 		defer close(c)
-		syncParallel(src, cloneURL, repoPath, pullID, c)
+		f.syncParallel(src, c)
 	}()
 	setupSync := setupWorkResult{"", true}
 	for i := range c {
@@ -306,7 +340,7 @@ func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit st
 			setupSync.ok = false
 		}
 	}
-	results <- file{"setup-1-sync", setupSync.content, setupSync.ok, time.Since(start)}
+	results <- gistFile{"setup-1-sync", setupSync.content, setupSync.ok, time.Since(start)}
 	if !setupSync.ok {
 		return false
 	}
@@ -315,7 +349,7 @@ func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit st
 	setupCmds := [][]string{
 		// "go get" will try to pull and will complain if the checkout is not on a
 		// branch.
-		{"git", "checkout", "--quiet", "-B", gohciBranch, commit},
+		{"git", "checkout", "--quiet", "-B", gohciBranch, j.commitHash},
 		// "git pull --ff-only" will fail if there's no tracking branch, and
 		// it occasionally happen.
 		{"git", "checkout", "--quiet", "-B", gohciBranch + "2", gohciBranch},
@@ -324,10 +358,10 @@ func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit st
 		// Precompilation has a dramatic effect on a Raspberry Pi. YMMV.
 		{"go", "test", "-i", "./..."},
 	}
-	setupGet := file{name: "setup-2-get", success: true}
+	setupGet := gistFile{name: "setup-2-get", success: true}
 	for _, c := range setupCmds {
 		stdout := ""
-		stdout, setupGet.success = run(repoPath, c...)
+		stdout, setupGet.success = run(f.repoPath, c...)
 		setupGet.content += stdout
 		if !setupGet.success {
 			break
@@ -342,8 +376,8 @@ func runChecks(cmds [][]string, repoName, altPath string, useSSH bool, commit st
 	// Finally run the checks!
 	for i, cmd := range cmds {
 		start = time.Now()
-		stdout, ok2 := run(repoPath, cmd...)
-		results <- file{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
+		stdout, ok2 := run(f.repoPath, cmd...)
+		results <- gistFile{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
 		if !ok2 {
 			// Still run the other tests.
 			ok = false
@@ -429,7 +463,14 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 		// https://developer.github.com/v3/activity/events/types/#commitcommentevent
 		if s.isSuperUser(*event.Sender.Login) && strings.HasPrefix(*event.Comment.Body, "gohci:") {
 			// TODO(maruel): The commit could be on a branch never fetched?
-			s.runCheckAsync(*event.Repo.FullName, *event.Comment.CommitID, *event.Repo.Private, nil, 0)
+			j := &jobRequest{
+				orgName:    *event.Repo.Owner.Login,
+				repoName:   *event.Repo.Name,
+				useSSH:     *event.Repo.Private,
+				commitHash: *event.Comment.CommitID,
+				pullID:     0,
+			}
+			s.runCheckAsync(j, nil)
 		}
 
 	case *github.IssueCommentEvent:
@@ -450,7 +491,14 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 				log.Printf("- ignoring PR from forked repo %q", *event.PullRequest.Head.Repo.FullName)
 			} else {
 				// For PRs, the commit has to be fetched manually.
-				s.runCheckAsync(*event.Repo.FullName, *event.PullRequest.Head.SHA, *event.Repo.Private, nil, *event.PullRequest.Number)
+				j := &jobRequest{
+					orgName:    *event.Repo.Owner.Login,
+					repoName:   *event.Repo.Name,
+					useSSH:     *event.Repo.Private,
+					commitHash: *event.PullRequest.Head.SHA,
+					pullID:     *event.PullRequest.Number,
+				}
+				s.runCheckAsync(j, nil)
 			}
 		case "pull_request_review_comment":
 			// TODO(maruel): Run for *event.Comment.Body == "gohci"
@@ -479,7 +527,14 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 						blame = []string{author}
 					}
 				}
-				s.runCheckAsync(*event.Repo.FullName, *event.HeadCommit.ID, *event.Repo.Private, blame, 0)
+				j := &jobRequest{
+					orgName:    *event.Repo.Owner.Name,
+					repoName:   *event.Repo.Name,
+					useSSH:     *event.Repo.Private,
+					commitHash: *event.HeadCommit.ID,
+					pullID:     0,
+				}
+				s.runCheckAsync(j, blame)
 			}
 		}
 	default:
@@ -490,18 +545,17 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 // runCheckAsync immediately add the status that the test run is pending and
 // add the run in the queue. Ensures that the service doesn't restart until the
 // task is done.
-func (s *server) runCheckAsync(repo, commit string, useSSH bool, blame []string, pullID int) {
+func (s *server) runCheckAsync(j *jobRequest, blame []string) {
 	s.wg.Add(1)
 	defer s.wg.Done()
-	log.Printf("- Enqueuing test for %s at %s", repo, commit)
+	log.Printf("- Enqueuing test for %s at %s", j.repo(), j.commitHash)
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
 		State:       github.String("pending"),
 		Description: github.String(fmt.Sprintf("Tests pending (0/%d)", len(s.c.Checks)+2)),
 		Context:     &s.c.Name,
 	}
-	parts := strings.SplitN(repo, "/", 2)
-	if _, _, err := s.client.Repositories.CreateStatus(ctx, parts[0], parts[1], commit, status); err != nil {
+	if _, _, err := s.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
 		// Don't bother running the tests.
 		log.Printf("- Failed to create status: %v", err)
 		return
@@ -510,12 +564,12 @@ func (s *server) runCheckAsync(repo, commit string, useSSH bool, blame []string,
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.runCheckSync(repo, commit, useSSH, status, blame, pullID)
+		s.runCheckSync(j, status, blame)
 	}()
 }
 
-// runCheckSync runs the check for the repository "repo" hosted on github at
-// commit "commit".
+// runCheckSync runs the check for the repository hosted on github at the
+// specified commit.
 //
 // It will use the ssh protocol if "useSSH" is set, https otherwise.
 // "status" is the github status to keep updating as progress is made.
@@ -523,25 +577,20 @@ func (s *server) runCheckAsync(repo, commit string, useSSH bool, blame []string,
 // of github handles. These strings are different from what appears in the git
 // commit log. Non-team members cannot be assigned an issue, in this case the
 // API will silently drop them.
-func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.RepoStatus, blame []string, pullID int) {
+func (s *server) runCheckSync(j *jobRequest, status *github.RepoStatus, blame []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	log.Printf("- Running test for %s at %s", repo, commit)
+	log.Printf("- Running test for %s at %s", j.repo(), j.commitHash)
 	total := len(s.c.Checks) + 2
+	gistDesc := fmt.Sprintf("%s for %s", s.c.Name, j)
 	suffix := fmt.Sprintf(" (0/%d)", total)
 	// https://developer.github.com/v3/gists/#create-a-gist
-	// It is still accessible via the URL without authentication.
-	gistDesc := ""
-	if pullID != 0 {
-		gistDesc = fmt.Sprintf("%s for https://github.com/%s/pull/%d at https://github.com/%s/commit/%s", s.c.Name, repo, pullID, repo, commit[:12])
-	} else {
-		gistDesc = fmt.Sprintf("%s for https://github.com/%s/commit/%s", s.c.Name, repo, commit[:12])
-	}
+	// It is accessible via the URL without authentication even if "private".
 	gist := &github.Gist{
 		Description: github.String(gistDesc + suffix),
 		Public:      github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
-			"setup-0-metadata": {Content: github.String(metadata(commit, s.gopath) + "\nCommands to be run:\n" + s.cmds)},
+			"setup-0-metadata": {Content: github.String(metadata(j.commitHash, s.gopath) + "\nCommands to be run:\n" + s.cmds)},
 		},
 	}
 	gist, _, err := s.client.Gists.Create(ctx, gist)
@@ -555,15 +604,12 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 	statusDesc := "Running tests"
 	status.TargetURL = gist.HTMLURL
 	status.Description = github.String(statusDesc + suffix)
-	parts := strings.SplitN(repo, "/", 2)
-	orgName := parts[0]
-	repoName := parts[1]
-	if _, _, err = s.client.Repositories.CreateStatus(ctx, orgName, repoName, commit, status); err != nil {
+	if _, _, err = s.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
 		log.Printf("- Failed to update status: %v", err)
 		return
 	}
 
-	failed := s.runCheckSyncLoop(repo, commit, pullID, orgName, repoName, suffix, statusDesc, gistDesc, total, useSSH, gist, status)
+	failed := s.runCheckSyncLoop(j, statusDesc, gistDesc, suffix, total, gist, status)
 
 	// This requires OAuth scope 'public_repo' or 'repo'. The problem is that
 	// this gives full write access, not just issue creation and this is
@@ -571,7 +617,7 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 	// code there as this is harmless and still work is people do not care about
 	// security.
 	if failed && len(blame) != 0 {
-		title := fmt.Sprintf("Build %q failed on %s", s.c.Name, commit)
+		title := fmt.Sprintf("Build %q failed on %s", s.c.Name, j.commitHash)
 		log.Printf("- Failed: %s", title)
 		log.Printf("- Blame: %v", blame)
 		// https://developer.github.com/v3/issues/#create-an-issue
@@ -581,24 +627,24 @@ func (s *server) runCheckSync(repo, commit string, useSSH bool, status *github.R
 			Body:      gist.HTMLURL,
 			Assignees: &blame,
 		}
-		if issue, _, err := s.client.Issues.Create(ctx, orgName, repoName, &issue); err != nil {
+		if issue, _, err := s.client.Issues.Create(ctx, j.orgName, j.repoName, &issue); err != nil {
 			log.Printf("- failed to create issue: %v", err)
 		} else {
 			log.Printf("- created issue #%d", *issue.ID)
 		}
 	}
-	log.Printf("- testing done: https://github.com/%s/commit/%s", repo, commit[:12])
+	log.Printf("- testing done: https://github.com/%s/commit/%s", j.repo(), j.commitHash[:12])
 }
 
 // runCheckSyncLoop is the inner loop of runCheckSync. It updates gist as the
 // checks are progressing.
-func (s *server) runCheckSyncLoop(repo, commit string, pullID int, orgName, repoName, suffix, statusDesc, gistDesc string, total int, useSSH bool, gist *github.Gist, status *github.RepoStatus) bool {
+func (s *server) runCheckSyncLoop(j *jobRequest, statusDesc, gistDesc, suffix string, total int, gist *github.Gist, status *github.RepoStatus) bool {
 	start := time.Now()
-	results := make(chan file)
+	results := make(chan gistFile)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		runChecks(s.c.Checks, repo, s.c.AltPath, useSSH, commit, pullID, s.gopath, results)
+		runChecks(s.c.Checks, j, s.c.AltPath, s.gopath, results)
 		close(results)
 	}()
 
@@ -612,7 +658,7 @@ func (s *server) runCheckSyncLoop(repo, commit string, pullID int, orgName, repo
 				log.Printf("- failed to update gist: %v", err)
 			}
 			gist.Files = map[github.GistFilename]github.GistFile{}
-			if _, _, err := s.client.Repositories.CreateStatus(ctx, orgName, repoName, commit, status); err != nil {
+			if _, _, err := s.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
 				log.Printf("- failed to update status: %v", err)
 			}
 			delay = nil
@@ -624,7 +670,7 @@ func (s *server) runCheckSyncLoop(repo, commit string, pullID int, orgName, repo
 						log.Printf("- failed to update gist: %v", err)
 					}
 					gist.Files = map[github.GistFilename]github.GistFile{}
-					if _, _, err := s.client.Repositories.CreateStatus(ctx, orgName, repoName, commit, status); err != nil {
+					if _, _, err := s.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
 						log.Printf("- failed to update status: %v", err)
 					}
 				}
@@ -665,9 +711,17 @@ func (s *server) runCheckSyncLoop(repo, commit string, pullID int, orgName, repo
 }
 
 // runLocal runs the checks run.
-func runLocal(s *server, c *config, gopath, commit, test string, update, useSSH bool) error {
+func runLocal(s *server, c *config, gopath, commitHash, test string, update, useSSH bool) error {
+	parts := strings.SplitN(test, "/", 2)
+	j := &jobRequest{
+		orgName:    parts[0],
+		repoName:   parts[1],
+		useSSH:     useSSH,
+		commitHash: commitHash,
+		pullID:     0,
+	}
 	if !update {
-		results := make(chan file)
+		results := make(chan gistFile)
 		var wg sync.WaitGroup
 		wg.Add(1)
 		go func() {
@@ -679,14 +733,14 @@ func runLocal(s *server, c *config, gopath, commit, test string, update, useSSH 
 				fmt.Printf("--- %s\n%s", i.name, i.content)
 			}
 		}()
-		fmt.Printf("--- setup-0-metadata\n%s", metadata(commit, gopath))
-		success := runChecks(c.Checks, test, c.AltPath, useSSH, commit, 0, gopath, results)
+		fmt.Printf("--- setup-0-metadata\n%s", metadata(commitHash, gopath))
+		success := runChecks(c.Checks, j, c.AltPath, gopath, results)
 		close(results)
 		wg.Wait()
 		_, err := fmt.Printf("\nSuccess: %t\n", success)
 		return err
 	}
-	s.runCheckAsync(test, commit, useSSH, nil, 0)
+	s.runCheckAsync(j, nil)
 	s.wg.Wait()
 	// TODO(maruel): Return any error that occurred.
 	return nil
