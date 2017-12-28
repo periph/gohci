@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,12 +30,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	fsnotify "gopkg.in/fsnotify.v1"
 	yaml "gopkg.in/yaml.v2"
 
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
-	"periph.io/x/gohci/lib"
 )
 
 var ctx = context.Background()
@@ -418,176 +414,8 @@ func (s *server) isSuperUser(u string) bool {
 	return false
 }
 
-// runCheckAsync immediately add the status that the test run is pending and
-// add the run in the queue. Ensures that the service doesn't restart until the
-// task is done.
-func (s *server) runCheckAsync(j *jobRequest, blame []string) {
-	s.wg.Add(1)
-	defer s.wg.Done()
-	log.Printf("- Enqueuing test for %s at %s", j.repo(), j.commitHash)
-	// https://developer.github.com/v3/repos/statuses/#create-a-status
-	status := &github.RepoStatus{
-		State:       github.String("pending"),
-		Description: github.String(fmt.Sprintf("Tests pending (0/%d)", len(s.c.Checks)+2)),
-		Context:     &s.c.Name,
-	}
-	if _, _, err := s.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
-		// Don't bother running the tests.
-		log.Printf("- Failed to create status: %v", err)
-		return
-	}
-	// Enqueue and run.
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.runCheckSync(j, status, blame)
-	}()
-}
-
-// runCheckSync runs the check for the repository hosted on github at the
-// specified commit.
-//
-// It will use the ssh protocol if "useSSH" is set, https otherwise.
-// "status" is the github status to keep updating as progress is made.
-// If "blame" is not empty, an issue is created on failure. This must be a list
-// of github handles. These strings are different from what appears in the git
-// commit log. Non-team members cannot be assigned an issue, in this case the
-// API will silently drop them.
-func (s *server) runCheckSync(j *jobRequest, status *github.RepoStatus, blame []string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	log.Printf("- Running test for %s at %s", j.repo(), j.commitHash)
-	total := len(s.c.Checks) + 2
-	gistDesc := fmt.Sprintf("%s for %s", s.c.Name, j)
-	suffix := fmt.Sprintf(" (0/%d)", total)
-	// https://developer.github.com/v3/gists/#create-a-gist
-	// It is accessible via the URL without authentication even if "private".
-	gist := &github.Gist{
-		Description: github.String(gistDesc + suffix),
-		Public:      github.Bool(false),
-		Files: map[github.GistFilename]github.GistFile{
-			"setup-0-metadata": {Content: github.String(metadata(j.commitHash, s.gopath) + "\nCommands to be run:\n" + s.cmds)},
-		},
-	}
-	gist, _, err := s.client.Gists.Create(ctx, gist)
-	if err != nil {
-		// Don't bother running the tests.
-		log.Printf("- Failed to create gist: %v", err)
-		return
-	}
-	log.Printf("- Gist at %s", *gist.HTMLURL)
-
-	statusDesc := "Running tests"
-	status.TargetURL = gist.HTMLURL
-	status.Description = github.String(statusDesc + suffix)
-	if _, _, err = s.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
-		log.Printf("- Failed to update status: %v", err)
-		return
-	}
-
-	failed := s.runCheckSyncLoop(j, statusDesc, gistDesc, suffix, total, gist, status)
-
-	// This requires OAuth scope 'public_repo' or 'repo'. The problem is that
-	// this gives full write access, not just issue creation and this is
-	// problematic with the current security design of this project. Leave the
-	// code there as this is harmless and still work is people do not care about
-	// security.
-	if failed && len(blame) != 0 {
-		title := fmt.Sprintf("Build %q failed on %s", s.c.Name, j.commitHash)
-		log.Printf("- Failed: %s", title)
-		log.Printf("- Blame: %v", blame)
-		// https://developer.github.com/v3/issues/#create-an-issue
-		issue := github.IssueRequest{
-			Title: &title,
-			// TODO(maruel): Add more than just the URL but that's a start.
-			Body:      gist.HTMLURL,
-			Assignees: &blame,
-		}
-		if issue, _, err := s.client.Issues.Create(ctx, j.orgName, j.repoName, &issue); err != nil {
-			log.Printf("- failed to create issue: %v", err)
-		} else {
-			log.Printf("- created issue #%d", *issue.ID)
-		}
-	}
-	log.Printf("- testing done: https://github.com/%s/commit/%s", j.repo(), j.commitHash[:12])
-}
-
-// runCheckSyncLoop is the inner loop of runCheckSync. It updates gist as the
-// checks are progressing.
-func (s *server) runCheckSyncLoop(j *jobRequest, statusDesc, gistDesc, suffix string, total int, gist *github.Gist, status *github.RepoStatus) bool {
-	start := time.Now()
-	results := make(chan gistFile)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		runChecks(s.c.Checks, j, s.c.AltPath, s.gopath, results)
-		close(results)
-	}()
-
-	i := 1
-	failed := false
-	var delay <-chan time.Time
-	for {
-		select {
-		case <-delay:
-			if _, _, err := s.client.Gists.Edit(ctx, *gist.ID, gist); err != nil {
-				log.Printf("- failed to update gist: %v", err)
-			}
-			gist.Files = map[github.GistFilename]github.GistFile{}
-			if _, _, err := s.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
-				log.Printf("- failed to update status: %v", err)
-			}
-			delay = nil
-
-		case r, ok := <-results:
-			if !ok {
-				if delay != nil {
-					if _, _, err := s.client.Gists.Edit(ctx, *gist.ID, gist); err != nil {
-						log.Printf("- failed to update gist: %v", err)
-					}
-					gist.Files = map[github.GistFilename]github.GistFile{}
-					if _, _, err := s.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
-						log.Printf("- failed to update status: %v", err)
-					}
-				}
-				return failed
-			}
-
-			// https://developer.github.com/v3/gists/#edit-a-gist
-			if len(r.content) == 0 {
-				r.content = "<missing>"
-			}
-			if !r.success {
-				r.name += " (failed)"
-				failed = true
-				status.State = github.String("failure")
-			}
-			r.name += " in " + roundTime(r.d).String()
-			suffix = ""
-			if i != total {
-				suffix = fmt.Sprintf(" (%d/%d)", i, total)
-			} else {
-				statusDesc = "Ran tests"
-				if !failed {
-					suffix += " (success!)"
-					status.State = github.String("success")
-				}
-			}
-			if failed {
-				suffix += " (failed)"
-			}
-			suffix += " in " + roundTime(time.Since(start)).String()
-			gist.Files[github.GistFilename(r.name)] = github.GistFile{Content: &r.content}
-			gist.Description = github.String(gistDesc + suffix)
-			status.Description = github.String(statusDesc + suffix)
-			delay = time.After(500 * time.Millisecond)
-			i++
-		}
-	}
-}
-
 // runLocal runs the checks run.
-func runLocal(s *server, c *config, gopath, commitHash, test string, update, useSSH bool) error {
+func runLocal(w *worker, gopath, commitHash, test string, update, useSSH bool) error {
 	parts := strings.SplitN(test, "/", 2)
 	j := &jobRequest{
 		orgName:    parts[0],
@@ -610,61 +438,17 @@ func runLocal(s *server, c *config, gopath, commitHash, test string, update, use
 			}
 		}()
 		fmt.Printf("--- setup-0-metadata\n%s", metadata(commitHash, gopath))
-		success := runChecks(c.Checks, j, c.AltPath, gopath, results)
+		success := runChecks(w.c.Checks, j, w.c.AltPath, gopath, results)
 		close(results)
 		wg.Wait()
 		_, err := fmt.Printf("\nSuccess: %t\n", success)
 		return err
 	}
-	s.runCheckAsync(j, nil)
-	s.wg.Wait()
+	// The reason for using the async version is that it creates the status.
+	w.enqueueCheck(j, nil)
+	w.wg.Wait()
 	// TODO(maruel): Return any error that occurred.
 	return nil
-}
-
-// runServer runs the web server.
-func runServer(s *server, c *config, wd, fileName string) error {
-	http.Handle("/", s)
-	thisFile, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	log.Printf("Running in: %s", wd)
-	log.Printf("Executable: %s", thisFile)
-	log.Printf("Name: %s", c.Name)
-	log.Printf("AltPath: %s", c.AltPath)
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", c.Port))
-	if err != nil {
-		return err
-	}
-	a := ln.Addr().String()
-	ln.Close()
-	log.Printf("Listening on: %s", a)
-	go http.ListenAndServe(a, nil)
-
-	w, err := fsnotify.NewWatcher()
-	if err != nil {
-		log.Printf("Failed to initialize watcher: %v", err)
-	} else if err = w.Add(thisFile); err != nil {
-		log.Printf("Failed to initialize watcher: %v", err)
-	} else if err = w.Add(fileName); err != nil {
-		log.Printf("Failed to initialize watcher: %v", err)
-	}
-
-	lib.SetConsoleTitle(fmt.Sprintf("gohci - %s - %s", a, wd))
-	if err == nil {
-		select {
-		case <-w.Events:
-		case err = <-w.Errors:
-			log.Printf("Waiting failure: %v", err)
-		}
-	} else {
-		// Hang so the server actually run.
-		select {}
-	}
-	// Ensures no task is running.
-	s.wg.Wait()
-	return err
 }
 
 // useGT replaces the "go test" calls with "gt".
@@ -747,11 +531,11 @@ func mainImpl() error {
 		cmds += "  " + strings.Join(cmd, " ")
 	}
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
-	s := &server{c: c, client: github.NewClient(tc), gopath: gopath, cmds: cmds}
+	w := &worker{c: c, client: github.NewClient(tc), gopath: gopath, cmds: cmds}
 	if len(*test) != 0 {
-		return runLocal(s, c, gopath, *commit, *test, *update, *useSSH)
+		return runLocal(w, gopath, *commit, *test, *update, *useSSH)
 	}
-	return runServer(s, c, wd, fileName)
+	return runServer(&server{c: c, w: w}, wd, fileName)
 }
 
 func main() {

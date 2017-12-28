@@ -1,29 +1,74 @@
-// Copyright 2016 Marc-Antoine Ruel. All rights reserved.
+// Copyright 2017 Marc-Antoine Ruel. All rights reserved.
 // Use of this source code is governed under the Apache License, Version 2.0
 // that can be found in the LICENSE file.
 
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/go-github/github"
+	fsnotify "gopkg.in/fsnotify.v1"
+	"periph.io/x/gohci/lib"
 )
 
-// server is both the HTTP server and the task queue server.
+// server is the HTTP server and manages the task queue server.
 type server struct {
-	c      *config
-	client *github.Client
-	gopath string
-	cmds   string
-	mu     sync.Mutex     // Set when a check is running
-	wg     sync.WaitGroup // Set for each pending task.
+	c *config
+	w *worker
+}
+
+// runServer runs the web server.
+func runServer(s *server, wd, fileName string) error {
+	http.Handle("/", s)
+	thisFile, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	log.Printf("Running in: %s", wd)
+	log.Printf("Executable: %s", thisFile)
+	log.Printf("Name: %s", s.c.Name)
+	log.Printf("AltPath: %s", s.c.AltPath)
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", s.c.Port))
+	if err != nil {
+		return err
+	}
+	a := ln.Addr().String()
+	ln.Close()
+	log.Printf("Listening on: %s", a)
+	go http.ListenAndServe(a, nil)
+
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Printf("Failed to initialize watcher: %v", err)
+	} else if err = w.Add(thisFile); err != nil {
+		log.Printf("Failed to initialize watcher: %v", err)
+	} else if err = w.Add(fileName); err != nil {
+		log.Printf("Failed to initialize watcher: %v", err)
+	}
+
+	lib.SetConsoleTitle(fmt.Sprintf("gohci - %s - %s", a, wd))
+	if err == nil {
+		select {
+		case <-w.Events:
+		case err = <-w.Errors:
+			log.Printf("Waiting failure: %v", err)
+		}
+	} else {
+		// Hang so the server actually run.
+		select {}
+	}
+	// Ensures no task is running.
+	s.w.wg.Wait()
+	return err
 }
 
 // ServeHTTP handles all HTTP requests and triggers a task if relevant.
@@ -88,7 +133,7 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 				commitHash: *event.Comment.CommitID,
 				pullID:     0,
 			}
-			s.runCheckAsync(j, nil)
+			s.w.enqueueCheck(j, nil)
 		}
 
 	case *github.IssueCommentEvent:
@@ -116,7 +161,7 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 					if !j.commitHashForPR() {
 						log.Printf("- failed to get HEAD for issue #%d", *event.Issue.Number)
 					} else {
-						s.runCheckAsync(j, nil)
+						s.w.enqueueCheck(j, nil)
 					}
 				} else {
 					log.Printf("- ignoring issue #%d comment from user %q", *event.Issue.Number, *event.Sender.Login)
@@ -140,7 +185,7 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 					commitHash: *event.PullRequest.Head.SHA,
 					pullID:     *event.PullRequest.Number,
 				}
-				s.runCheckAsync(j, nil)
+				s.w.enqueueCheck(j, nil)
 			} else {
 				log.Printf("- ignoring PR from not super user %q", *event.PullRequest.Head.Repo.FullName)
 			}
@@ -161,7 +206,7 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 					commitHash: *event.PullRequest.Head.SHA,
 					pullID:     *event.PullRequest.Number,
 				}
-				s.runCheckAsync(j, nil)
+				s.w.enqueueCheck(j, nil)
 			} else {
 				log.Printf("- ignoring issue #%d comment from user %q", *event.PullRequest.Number, *event.Sender.Login)
 			}
@@ -196,7 +241,7 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 					commitHash: *event.HeadCommit.ID,
 					pullID:     0,
 				}
-				s.runCheckAsync(j, blame)
+				s.w.enqueueCheck(j, blame)
 			}
 		}
 	default:
