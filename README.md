@@ -194,6 +194,20 @@ The task should show up with: `schtasks /query /fo table | more` or navigating
 the GUI with `taskschd.msc`.
 
 
+### OSX
+
+Create a `gohci` standard account and set it to auto-login upon boot. Use the
+included `gohci.yml` to set it to automatically start upon login:
+
+```
+mkdir -p ~/Library/LaunchAgents
+cp osx/gohci.plist ~/Library/LaunchAgents
+mkdir gohci
+```
+
+Create `~/gohci/gohci.yml` with the relevant configuration as described above.
+
+
 ## Private repository
 
 `gohci` will automatically switch from HTTPS to SSH checkout when the repository
