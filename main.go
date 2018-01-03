@@ -244,22 +244,28 @@ type fetchDetails struct {
 }
 
 // cloneOrFetch is meant to be used on the primary repository, making sure it
-// is checked out.
-func (f *fetchDetails) cloneOrFetch() (string, bool) {
-	if _, err := os.Stat(f.repoPath); err == nil {
-		if f.pullID != 0 {
+// is checked out at the expected commit or Pull Request.
+func (f *fetchDetails) cloneOrFetch(c chan<- setupWorkResult) {
+	if _, err := os.Stat(f.repoPath); err != nil && !os.IsNotExist(err) {
+		c <- setupWorkResult{"<failure>\n" + err.Error() + "\n", false}
+		return
+	} else if err != nil {
+		// Directory doesn't exist, need to clone.
+		stdout, ok := run(filepath.Dir(f.repoPath), "git", "clone", "--quiet", f.cloneURL)
+		c <- setupWorkResult{stdout, ok}
+		if f.pullID == 0 || !ok {
 			// For PRs, the commit has to be fetched manually.
-			return run(f.repoPath, "git", "fetch", "--prune", "--quiet", "origin", fmt.Sprintf("pull/%d/head", f.pullID))
+			return
 		}
-		return run(f.repoPath, "git", "fetch", "--prune", "--quiet", "origin")
-	} else if !os.IsNotExist(err) {
-		return "<failure>\n" + err.Error() + "\n", false
 	}
+
+	// Directory exists, need to fetch.
+	args := []string{"git", "fetch", "--prune", "--quiet", "origin"}
 	if f.pullID != 0 {
-		// TODO(maruel): Not sure this works.
-		return run(filepath.Dir(f.repoPath), "git", "clone", "--quiet", f.cloneURL, "-b", fmt.Sprintf("pull/%d/head", f.pullID))
+		args = append(args, fmt.Sprintf("pull/%d/head", f.pullID))
 	}
-	return run(filepath.Dir(f.repoPath), "git", "clone", "--quiet", f.cloneURL)
+	stdout, ok := run(f.repoPath, args...)
+	c <- setupWorkResult{stdout, ok}
 }
 
 // syncParallel checkouts out one repository if missing, and syncs all the
@@ -286,8 +292,7 @@ func (f *fetchDetails) syncParallel(root string, c chan<- setupWorkResult) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		stdout, ok := f.cloneOrFetch()
-		c <- setupWorkResult{stdout, ok}
+		f.cloneOrFetch(c)
 	}()
 	// Sync all the repositories concurrently.
 	err = filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
