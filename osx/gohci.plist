@@ -8,6 +8,13 @@
     <array>
       <string>/Users/gohci/go/bin/gohci</string>
     </array>
+    <!-- Edit if you installed Go locally.
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/X11/bin:/usr/local/git/bin:/Users/gohci/golang/bin:/Users/gohci/go/bin</string>
+    </dict>
+    -->
     <key>WorkingDirectory</key>
     <string>/Users/gohci/gohci</string>
     <key>StandardOutPath</key>
