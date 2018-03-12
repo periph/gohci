@@ -456,33 +456,6 @@ func runLocal(w *worker, gopath, commitHash, test string, update, useSSH bool) e
 	return nil
 }
 
-// useGT replaces the "go test" calls with "gt".
-func useGT(c *config, wd, gopath string) {
-	hasTest := false
-	for _, cmd := range c.Checks {
-		if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
-			hasTest = true
-			break
-		}
-	}
-	if !hasTest {
-		return
-	}
-	stdout, useGT := run(wd, "go", "get", "rsc.io/gt")
-	if !useGT {
-		log.Print(stdout)
-		return
-	}
-	log.Print("Using gt")
-	os.Setenv("CACHE", gopath)
-	for i, cmd := range c.Checks {
-		if len(cmd) >= 2 && cmd[0] == "go" && cmd[1] == "test" {
-			cmd[1] = "gt"
-			c.Checks[i] = cmd[1:]
-		}
-	}
-}
-
 func mainImpl() error {
 	start = time.Now()
 	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'periph/gohci'")
@@ -523,11 +496,9 @@ func mainImpl() error {
 	}
 	gopath := filepath.Join(wd, "go")
 	// GOPATH may not be set especially when running from systemd, so use the
-	// local GOPATH to install gt. This is safer as this doesn't modify the host
-	// environment.
+	// local GOPATH. This is safer as this doesn't modify the host environment.
 	os.Setenv("GOPATH", gopath)
 	os.Setenv("PATH", filepath.Join(gopath, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
-	useGT(c, wd, gopath)
 	cmds := ""
 	for i, cmd := range c.Checks {
 		if i != 0 {
