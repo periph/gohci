@@ -376,8 +376,6 @@ func runChecks(cmds [][]string, j *jobRequest, altPath string, gopath string, re
 		{"git", "checkout", "--quiet", "-B", gohciBranch + "2", gohciBranch},
 		// Pull add necessary dependencies.
 		{"go", "get", "-v", "-d", "-t", "./..."},
-		// Precompilation has a dramatic effect on a Raspberry Pi. YMMV.
-		{"go", "test", "-i", "./..."},
 	}
 	setupGet := gistFile{name: "setup-2-get", success: true}
 	for _, c := range setupCmds {
