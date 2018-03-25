@@ -5,22 +5,45 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/go-github/github"
+	"golang.org/x/oauth2"
 )
 
 // worker is the task queue server.
 type worker struct {
 	c      *config
+	ctx    context.Context
 	client *github.Client // Used to set commit status and create gists.
 	gopath string         // Working environment.
 	cmds   string         // List of commands to attach to the metadata gist.
-	mu     sync.Mutex     // Set when a check is running in runCheck()
-	wg     sync.WaitGroup // Set for each pending task.
+
+	mu sync.Mutex     // Set when a check is running in runCheck()
+	wg sync.WaitGroup // Set for each pending task.
+}
+
+func newWorker(c *config, gopath string) *worker {
+	cmds := ""
+	for i, cmd := range c.Checks {
+		if i != 0 {
+			cmds += "\n"
+		}
+		cmds += "  " + strings.Join(cmd, " ")
+	}
+	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
+	return &worker{
+		c:      c,
+		ctx:    context.Background(),
+		client: github.NewClient(tc),
+		gopath: gopath,
+		cmds:   cmds,
+	}
 }
 
 // enqueueCheck immediately add the status that the test run is pending and
@@ -36,7 +59,7 @@ func (w *worker) enqueueCheck(j *jobRequest, blame []string) {
 		Description: github.String(fmt.Sprintf("Tests pending (0/%d)", len(w.c.Checks)+2)),
 		Context:     &w.c.Name,
 	}
-	if _, _, err := w.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
+	if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
 		// Don't bother running the tests.
 		log.Printf("- Failed to create status: %v", err)
 		return
@@ -74,7 +97,7 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 			"setup-0-metadata": {Content: github.String(metadata(j.commitHash, w.gopath) + "\nCommands to be run:\n" + w.cmds)},
 		},
 	}
-	gist, _, err := w.client.Gists.Create(ctx, gist)
+	gist, _, err := w.client.Gists.Create(w.ctx, gist)
 	if err != nil {
 		// Don't bother running the tests.
 		log.Printf("- Failed to create gist: %v", err)
@@ -85,7 +108,7 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 	statusDesc := "Running tests"
 	status.TargetURL = gist.HTMLURL
 	status.Description = github.String(statusDesc + suffix)
-	if _, _, err = w.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
+	if _, _, err = w.client.Repositories.CreateStatus(w.ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
 		log.Printf("- Failed to update status: %v", err)
 		return
 	}
@@ -108,7 +131,7 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 			Body:      gist.HTMLURL,
 			Assignees: &blame,
 		}
-		if issue, _, err := w.client.Issues.Create(ctx, j.orgName, j.repoName, &issue); err != nil {
+		if issue, _, err := w.client.Issues.Create(w.ctx, j.orgName, j.repoName, &issue); err != nil {
 			log.Printf("- failed to create issue: %v", err)
 		} else {
 			log.Printf("- created issue #%d", *issue.ID)
@@ -135,11 +158,11 @@ func (w *worker) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix strin
 	for {
 		select {
 		case <-delay:
-			if _, _, err := w.client.Gists.Edit(ctx, *gist.ID, gist); err != nil {
+			if _, _, err := w.client.Gists.Edit(w.ctx, *gist.ID, gist); err != nil {
 				log.Printf("- failed to update gist: %v", err)
 			}
 			gist.Files = map[github.GistFilename]github.GistFile{}
-			if _, _, err := w.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
+			if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
 				log.Printf("- failed to update status: %v", err)
 			}
 			delay = nil
@@ -147,11 +170,11 @@ func (w *worker) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix strin
 		case r, ok := <-results:
 			if !ok {
 				if delay != nil {
-					if _, _, err := w.client.Gists.Edit(ctx, *gist.ID, gist); err != nil {
+					if _, _, err := w.client.Gists.Edit(w.ctx, *gist.ID, gist); err != nil {
 						log.Printf("- failed to update gist: %v", err)
 					}
 					gist.Files = map[github.GistFilename]github.GistFile{}
-					if _, _, err := w.client.Repositories.CreateStatus(ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
+					if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
 						log.Printf("- failed to update status: %v", err)
 					}
 				}

@@ -14,11 +14,9 @@
 package main // import "periph.io/x/gohci"
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -29,69 +27,11 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
-
-	yaml "gopkg.in/yaml.v2"
-
-	"github.com/google/go-github/github"
-	"golang.org/x/oauth2"
 )
 
-var ctx = context.Background()
-var start time.Time
-
-// gohciBranch is a git branch name that doens't have an high likelihood of
+// gohciBranch is a git branch name that doesn't have an high likelihood of
 // conflicting.
 const gohciBranch = "_gohci"
-
-type config struct {
-	Port              int        // TCP port number for HTTP server.
-	WebHookSecret     string     // https://developer.github.com/webhooks/
-	Oauth2AccessToken string     // https://github.com/settings/tokens, check "repo:status" and "gist"
-	Name              string     // Display name to use in the status report on Github.
-	AltPath           string     // Alternative package path to use. Defaults to the actual path.
-	SuperUsers        []string   // List of github accounts that can trigger a run. In practice any user with write access is a super user but OAuth2 tokens with limited scopes cannot get this information.
-	Checks            [][]string // Commands to run to test the repository. They are run one after the other from the repository's root.
-}
-
-// loadConfig loads the current config or returns the default one.
-//
-// It saves a reformatted version on disk if it was not in the canonical format.
-func loadConfig(fileName string) (*config, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "gohci"
-	}
-	c := &config{
-		Port:              8080,
-		WebHookSecret:     "Create a secret and set it at github.com/user/repo/settings/hooks",
-		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
-		Name:              hostname,
-		AltPath:           "",
-		SuperUsers:        nil,
-		Checks:            nil,
-	}
-	b, err := ioutil.ReadFile(fileName)
-	if err != nil {
-		b, err = yaml.Marshal(c)
-		if err != nil {
-			return nil, err
-		}
-		if len(c.Checks) == 0 {
-			c.Checks = [][]string{{"go", "test", "./..."}}
-		}
-		if err = ioutil.WriteFile(fileName, b, 0600); err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("wrote new %s", fileName)
-	}
-	if err = yaml.Unmarshal(b, c); err != nil {
-		return nil, err
-	}
-	if len(c.Checks) == 0 {
-		c.Checks = [][]string{{"go", "test", "./..."}}
-	}
-	return c, nil
-}
 
 // normalizeUTF8 returns valid UTF8 from potentially incorrectly encoded data
 // from an untrusted process.
@@ -405,18 +345,6 @@ func runChecks(cmds [][]string, j *jobRequest, altPath string, gopath string, re
 	return ok
 }
 
-// isSuperUser returns true if the user can trigger tasks.
-func (s *server) isSuperUser(u string) bool {
-	for _, c := range s.c.SuperUsers {
-		if c == u {
-			return true
-		}
-	}
-	// s.client.Repositories.IsCollaborator() requires *write* access to the
-	// repository, which we really do not want here. So don't even try for now.
-	return false
-}
-
 // runLocal runs the checks run.
 func runLocal(w *worker, gopath, commitHash, test string, update, useSSH bool) error {
 	parts := strings.SplitN(test, "/", 2)
@@ -455,7 +383,6 @@ func runLocal(w *worker, gopath, commitHash, test string, update, useSSH bool) e
 }
 
 func mainImpl() error {
-	start = time.Now()
 	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'periph/gohci'")
 	commit := flag.String("commit", "", "commit SHA1 to test and update; will only update status on github if not 'HEAD'")
 	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS; only necessary when testing")
@@ -497,19 +424,11 @@ func mainImpl() error {
 	// local GOPATH. This is safer as this doesn't modify the host environment.
 	os.Setenv("GOPATH", gopath)
 	os.Setenv("PATH", filepath.Join(gopath, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
-	cmds := ""
-	for i, cmd := range c.Checks {
-		if i != 0 {
-			cmds += "\n"
-		}
-		cmds += "  " + strings.Join(cmd, " ")
-	}
-	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
-	w := &worker{c: c, client: github.NewClient(tc), gopath: gopath, cmds: cmds}
+	w := newWorker(c, gopath)
 	if len(*test) != 0 {
 		return runLocal(w, gopath, *commit, *test, *update, *useSSH)
 	}
-	return runServer(&server{c: c, w: w}, wd, fileName)
+	return runServer(c, w, wd, fileName)
 }
 
 func main() {

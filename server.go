@@ -20,30 +20,27 @@ import (
 	"periph.io/x/gohci/lib"
 )
 
-// server is the HTTP server and manages the task queue server.
-type server struct {
-	c *config
-	w *worker
-}
-
 // runServer runs the web server.
-func runServer(s *server, wd, fileName string) error {
-	http.Handle("/", s)
+func runServer(c *config, wkr *worker, wd, fileName string) error {
 	thisFile, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	log.Printf("Running in: %s", wd)
 	log.Printf("Executable: %s", thisFile)
-	log.Printf("Name: %s", s.c.Name)
-	log.Printf("AltPath: %s", s.c.AltPath)
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", s.c.Port))
+	log.Printf("Name: %s", c.Name)
+	log.Printf("AltPath: %s", c.AltPath)
+
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", c.Port))
 	if err != nil {
 		return err
 	}
 	a := ln.Addr().String()
 	ln.Close()
 	log.Printf("Listening on: %s", a)
+
+	s := &server{c: c, w: wkr, start: time.Now()}
+	http.Handle("/", s)
 	go http.ListenAndServe(a, nil)
 
 	w, err := fsnotify.NewWatcher()
@@ -71,6 +68,13 @@ func runServer(s *server, wd, fileName string) error {
 	return err
 }
 
+// server is the HTTP server and manages the task queue server.
+type server struct {
+	c     *config
+	w     *worker
+	start time.Time
+}
+
 // ServeHTTP handles all HTTP requests and triggers a task if relevant.
 //
 // While the task is started asynchronously, a synchronous status update is
@@ -91,7 +95,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == "GET" {
 		// Return the uptime. This is a small enough information leak.
-		io.WriteString(w, time.Since(start).String())
+		io.WriteString(w, time.Since(s.start).String())
 		return
 	}
 	if r.Method != "POST" {
@@ -247,4 +251,14 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 	default:
 		log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
 	}
+}
+
+// isSuperUser returns true if the user can trigger tasks.
+func (s *server) isSuperUser(u string) bool {
+	if s.c.isSuperUser(u) {
+		return true
+	}
+	// s.client.Repositories.IsCollaborator() requires *write* access to the
+	// repository, which we really do not want here. So don't even try for now.
+	return false
 }
