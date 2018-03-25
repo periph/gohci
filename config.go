@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 
 	yaml "gopkg.in/yaml.v1"
 )
@@ -72,4 +73,17 @@ func (c *config) isSuperUser(u string) bool {
 	// s.client.Repositories.IsCollaborator() requires *write* access to the
 	// repository, which we really do not want here. So don't even try for now.
 	return false
+}
+
+// cmds returns the list of commands to attach to the metadata gist as a single
+// indented string.
+func (c *config) cmds() string {
+	cmds := ""
+	for i, cmd := range c.Checks {
+		if i != 0 {
+			cmds += "\n"
+		}
+		cmds += "  " + strings.Join(cmd, " ")
+	}
+	return cmds
 }

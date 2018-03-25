@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,27 +21,18 @@ type worker struct {
 	ctx    context.Context
 	client *github.Client // Used to set commit status and create gists.
 	gopath string         // Working environment.
-	cmds   string         // List of commands to attach to the metadata gist.
 
 	mu sync.Mutex     // Set when a check is running in runCheck()
 	wg sync.WaitGroup // Set for each pending task.
 }
 
 func newWorker(c *config, gopath string) *worker {
-	cmds := ""
-	for i, cmd := range c.Checks {
-		if i != 0 {
-			cmds += "\n"
-		}
-		cmds += "  " + strings.Join(cmd, " ")
-	}
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
 	return &worker{
 		c:      c,
 		ctx:    context.Background(),
 		client: github.NewClient(tc),
 		gopath: gopath,
-		cmds:   cmds,
 	}
 }
 
@@ -94,7 +84,7 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 		Description: github.String(gistDesc + suffix),
 		Public:      github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
-			"setup-0-metadata": {Content: github.String(metadata(j.commitHash, w.gopath) + "\nCommands to be run:\n" + w.cmds)},
+			"setup-0-metadata": {Content: github.String(metadata(j.commitHash, w.gopath) + "\nCommands to be run:\n" + w.c.cmds())},
 		},
 	}
 	gist, _, err := w.client.Gists.Create(w.ctx, gist)
