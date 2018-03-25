@@ -108,121 +108,138 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("- invalid secret")
 		return
 	}
-	s.handleHook(w, github.WebHookType(r), payload)
+	s.handleHook(github.WebHookType(r), payload)
 	io.WriteString(w, "{}")
 }
 
 // handleHook handles a validated github webhook.
-func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
+func (s *server) handleHook(t string, payload []byte) {
 	if t == "ping" {
 		return
 	}
 	event, err := github.ParseWebHook(t, payload)
 	if err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
-		log.Printf("- invalid payload")
+		log.Printf("- invalid payload for hook %s\n%s", t, payload)
 		return
 	}
 	// Process the rest asynchronously so the hook doesn't take too long.
-	switch event := event.(type) {
+	switch e := event.(type) {
 	case *github.CommitCommentEvent:
-		p := s.c.getProject(*event.Repo.Owner.Login, *event.Repo.Name)
-		// https://developer.github.com/v3/activity/events/types/#commitcommentevent
-		if p.isSuperUser(*event.Sender.Login) && strings.HasPrefix(*event.Comment.Body, "gohci:") {
-			// TODO(maruel): The commit could be on a branch never fetched?
-			j := newJobRequest(p, *event.Repo.Private, *event.Comment.CommitID, 0)
-			s.w.enqueueCheck(j, nil)
-		}
-
+		s.handleCommitComment(e)
 	case *github.IssueCommentEvent:
-		// We'd need the PR's commit head but it is not in the webhook payload.
-		// This means we'd require read access to the issues, which the OAuth
-		// token shouldn't have. This is because there is no read access to the
-		// issue without write access.
-		if event.Issue.PullRequestLinks == nil {
-			log.Printf("- ignoring issue #%d", *event.Issue.Number)
-		} else {
-			switch *event.Action {
-			case "created":
-				// || *event.Issue.AuthorAssociation == "CONTRIBUTOR"
-				p := s.c.getProject(*event.Repo.Owner.Login, *event.Repo.Name)
-				if p.isSuperUser(*event.Sender.Login) && strings.TrimSpace(*event.Comment.Body) == "gohci" {
-					// The commit hash is not provided. :(
-					j := newJobRequest(p, *event.Repo.Private, "", *event.Issue.Number)
-					// Immediately fetch the issue head commit inside the webhook, since
-					// it's a race condition.
-					if !j.commitHashForPR() {
-						log.Printf("- failed to get HEAD for issue #%d", *event.Issue.Number)
-					} else {
-						s.w.enqueueCheck(j, nil)
-					}
-				} else {
-					log.Printf("- ignoring issue #%d comment from user %q", *event.Issue.Number, *event.Sender.Login)
-				}
-			default:
-				log.Printf("- ignoring PR #%d comment", *event.Issue.Number)
-			}
-		}
-
+		s.handleIssueComment(e)
 	case *github.PullRequestEvent:
-		log.Printf("- PR %s #%d %s %s", *event.Repo.FullName, *event.PullRequest.Number, *event.Sender.Login, *event.Action)
-		switch *event.Action {
-		case "opened", "synchronize":
-			// TODO(maruel): If a reviewer is set, it has to be set by a repository
-			// owner (?) If so, then it would be safe to run.
-			p := s.c.getProject(*event.Repo.Owner.Login, *event.Repo.Name)
-			if p.isSuperUser(*event.Sender.Login) {
-				j := newJobRequest(p, *event.Repo.Private, *event.PullRequest.Head.SHA, *event.PullRequest.Number)
-				s.w.enqueueCheck(j, nil)
-			} else {
-				log.Printf("- ignoring PR from not super user %q", *event.PullRequest.Head.Repo.FullName)
-			}
-		//case "pull_request_review_comment":
-		default:
-			log.Printf("- ignoring action %q for PR from %q", *event.Action, *event.Sender.Login)
-		}
-
+		s.handlePullRequest(e)
 	case *github.PullRequestReviewCommentEvent:
-		switch *event.Action {
-		case "created", "edited":
-			// || *event.PullRequest.AuthorAssociation == "CONTRIBUTOR"
-			p := s.c.getProject(*event.Repo.Owner.Login, *event.Repo.Name)
-			if p.isSuperUser(*event.Sender.Login) && strings.TrimSpace(*event.Comment.Body) == "gohci" {
-				j := newJobRequest(p, *event.Repo.Private, *event.PullRequest.Head.SHA, *event.PullRequest.Number)
-				s.w.enqueueCheck(j, nil)
-			} else {
-				log.Printf("- ignoring issue #%d comment from user %q", *event.PullRequest.Number, *event.Sender.Login)
-			}
-		default:
-			log.Printf("- ignoring PR #%d comment", *event.PullRequest.Number)
-		}
-
+		s.handlePullRequestReviewComment(e)
 	case *github.PushEvent:
-		if event.HeadCommit == nil {
-			log.Printf("- Push %s %s <deleted>", *event.Repo.FullName, *event.Ref)
-		} else {
-			log.Printf("- Push %s %s %s", *event.Repo.FullName, *event.Ref, *event.HeadCommit.ID)
-			// TODO(maruel): Potentially leverage event.Repo.DefaultBranch or
-			// event.Repo.MasterBranch?
-			if !strings.HasPrefix(*event.Ref, "refs/heads/") {
-				log.Printf("- ignoring branch %q for push", *event.Ref)
-			} else {
-				var blame []string
-				if *event.Ref == "refs/heads/master" {
-					author := *event.HeadCommit.Author.Login
-					committer := *event.HeadCommit.Committer.Login
-					if author != committer {
-						blame = []string{author, committer}
-					} else {
-						blame = []string{author}
-					}
-				}
-				p := s.c.getProject(*event.Repo.Owner.Name, *event.Repo.Name)
-				j := newJobRequest(p, *event.Repo.Private, *event.HeadCommit.ID, 0)
-				s.w.enqueueCheck(j, blame)
-			}
-		}
+		s.handlePush(e)
 	default:
-		log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
+		log.Printf("- ignoring hook type %s", reflect.TypeOf(e).Elem().Name())
 	}
+}
+
+// https://developer.github.com/v3/activity/events/types/#commitcommentevent
+func (s *server) handleCommitComment(e *github.CommitCommentEvent) {
+	p := s.c.getProject(*e.Repo.Owner.Login, *e.Repo.Name)
+	if !p.isSuperUser(*e.Sender.Login) || strings.TrimSpace(*e.Comment.Body) != "gohci" {
+		log.Printf("- ignoring commit comment from user %q", *e.Sender.Login)
+		return
+	}
+	// TODO(maruel): The commit could be on a branch never fetched?
+	j := newJobRequest(p, *e.Repo.Private, *e.Comment.CommitID, 0)
+	s.w.enqueueCheck(j, nil)
+}
+
+// https://developer.github.com/v3/activity/events/types/#issuecommentevent
+func (s *server) handleIssueComment(e *github.IssueCommentEvent) {
+	// We'd need the PR's commit head but it is not in the webhook payload.
+	// This means we'd require read access to the issues, which the OAuth
+	// token shouldn't have. This is because there is no read access to the
+	// issue without write access.
+	if e.Issue.PullRequestLinks == nil {
+		log.Printf("- ignoring issue #%d", *e.Issue.Number)
+		return
+	}
+	if *e.Action != "created" && *e.Action != "edited" {
+		log.Printf("- ignoring PR #%d comment", *e.Issue.Number)
+		return
+	}
+	// || *e.Issue.AuthorAssociation == "CONTRIBUTOR"
+	p := s.c.getProject(*e.Repo.Owner.Login, *e.Repo.Name)
+	if !p.isSuperUser(*e.Sender.Login) || strings.TrimSpace(*e.Comment.Body) != "gohci" {
+		log.Printf("- ignoring issue #%d comment from user %q", *e.Issue.Number, *e.Sender.Login)
+		return
+	}
+	// The commit hash is not provided. :(
+	j := newJobRequest(p, *e.Repo.Private, "", *e.Issue.Number)
+	// Immediately fetch the issue head commit inside the webhook, since
+	// it's a race condition.
+	if !j.commitHashForPR() {
+		log.Printf("- failed to get HEAD for issue #%d", *e.Issue.Number)
+		return
+	}
+	s.w.enqueueCheck(j, nil)
+}
+
+// https://developer.github.com/v3/activity/events/types/#pullrequestevent
+func (s *server) handlePullRequest(e *github.PullRequestEvent) {
+	if *e.Action != "opened" && *e.Action != "synchronize" {
+		log.Printf("- ignoring action %q for PR from %q", *e.Action, *e.Sender.Login)
+		return
+	}
+	log.Printf("- PR %s #%d %s %s", *e.Repo.FullName, *e.PullRequest.Number, *e.Sender.Login, *e.Action)
+	// TODO(maruel): If a reviewer is set, it has to be set by a repository
+	// owner (?) If so, then it would be safe to run.
+	p := s.c.getProject(*e.Repo.Owner.Login, *e.Repo.Name)
+	if !p.isSuperUser(*e.Sender.Login) {
+		log.Printf("- ignoring PR from not super user %q", *e.PullRequest.Head.Repo.FullName)
+		return
+	}
+	j := newJobRequest(p, *e.Repo.Private, *e.PullRequest.Head.SHA, *e.PullRequest.Number)
+	s.w.enqueueCheck(j, nil)
+}
+
+// https://developer.github.com/v3/activity/events/types/#pullrequestreviewcommentevent
+func (s *server) handlePullRequestReviewComment(e *github.PullRequestReviewCommentEvent) {
+	if *e.Action != "created" && *e.Action != "edited" {
+		log.Printf("- ignoring action %s for PR #%d comment", *e.Action, *e.PullRequest.Number)
+		return
+	}
+	// || *e.PullRequest.AuthorAssociation == "CONTRIBUTOR"
+	p := s.c.getProject(*e.Repo.Owner.Login, *e.Repo.Name)
+	if !p.isSuperUser(*e.Sender.Login) || strings.TrimSpace(*e.Comment.Body) != "gohci" {
+		log.Printf("- ignoring issue #%d comment from user %q", *e.PullRequest.Number, *e.Sender.Login)
+		return
+	}
+	j := newJobRequest(p, *e.Repo.Private, *e.PullRequest.Head.SHA, *e.PullRequest.Number)
+	s.w.enqueueCheck(j, nil)
+}
+
+// https://developer.github.com/v3/activity/events/types/#pushevent
+func (s *server) handlePush(e *github.PushEvent) {
+	if e.HeadCommit == nil {
+		log.Printf("- Push %s %s <deleted>", *e.Repo.FullName, *e.Ref)
+		return
+	}
+	log.Printf("- Push %s %s %s", *e.Repo.FullName, *e.Ref, *e.HeadCommit.ID)
+	// TODO(maruel): Potentially leverage e.Repo.DefaultBranch or
+	// e.Repo.MasterBranch?
+	if !strings.HasPrefix(*e.Ref, "refs/heads/") {
+		log.Printf("- ignoring branch %q for push", *e.Ref)
+		return
+	}
+	var blame []string
+	if *e.Ref == "refs/heads/master" {
+		author := *e.HeadCommit.Author.Login
+		committer := *e.HeadCommit.Committer.Login
+		if author != committer {
+			blame = []string{author, committer}
+		} else {
+			blame = []string{author}
+		}
+	}
+	p := s.c.getProject(*e.Repo.Owner.Name, *e.Repo.Name)
+	j := newJobRequest(p, *e.Repo.Private, *e.HeadCommit.ID, 0)
+	s.w.enqueueCheck(j, blame)
 }
