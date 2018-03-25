@@ -29,7 +29,6 @@ func runServer(c *config, wkr *worker, wd, fileName string) error {
 	log.Printf("Running in: %s", wd)
 	log.Printf("Executable: %s", thisFile)
 	log.Printf("Name: %s", c.Name)
-	log.Printf("AltPath: %s", c.AltPath)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", c.Port))
 	if err != nil {
@@ -127,10 +126,11 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 	// Process the rest asynchronously so the hook doesn't take too long.
 	switch event := event.(type) {
 	case *github.CommitCommentEvent:
+		p := s.c.getProject(*event.Repo.Owner.Login, *event.Repo.Name)
 		// https://developer.github.com/v3/activity/events/types/#commitcommentevent
-		if s.isSuperUser(*event.Sender.Login) && strings.HasPrefix(*event.Comment.Body, "gohci:") {
+		if p.isSuperUser(*event.Sender.Login) && strings.HasPrefix(*event.Comment.Body, "gohci:") {
 			// TODO(maruel): The commit could be on a branch never fetched?
-			j := newJobRequest(*event.Repo.Owner.Login, *event.Repo.Name, *event.Repo.Private, *event.Comment.CommitID, 0)
+			j := newJobRequest(p, *event.Repo.Private, *event.Comment.CommitID, 0)
 			s.w.enqueueCheck(j, nil)
 		}
 
@@ -145,9 +145,10 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 			switch *event.Action {
 			case "created":
 				// || *event.Issue.AuthorAssociation == "CONTRIBUTOR"
-				if s.isSuperUser(*event.Sender.Login) && strings.TrimSpace(*event.Comment.Body) == "gohci" {
+				p := s.c.getProject(*event.Repo.Owner.Login, *event.Repo.Name)
+				if p.isSuperUser(*event.Sender.Login) && strings.TrimSpace(*event.Comment.Body) == "gohci" {
 					// The commit hash is not provided. :(
-					j := newJobRequest(*event.Repo.Owner.Login, *event.Repo.Name, *event.Repo.Private, "", *event.Issue.Number)
+					j := newJobRequest(p, *event.Repo.Private, "", *event.Issue.Number)
 					// Immediately fetch the issue head commit inside the webhook, since
 					// it's a race condition.
 					if !j.commitHashForPR() {
@@ -169,8 +170,9 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 		case "opened", "synchronize":
 			// TODO(maruel): If a reviewer is set, it has to be set by a repository
 			// owner (?) If so, then it would be safe to run.
-			if s.isSuperUser(*event.Sender.Login) {
-				j := newJobRequest(*event.Repo.Owner.Login, *event.Repo.Name, *event.Repo.Private, *event.PullRequest.Head.SHA, *event.PullRequest.Number)
+			p := s.c.getProject(*event.Repo.Owner.Login, *event.Repo.Name)
+			if p.isSuperUser(*event.Sender.Login) {
+				j := newJobRequest(p, *event.Repo.Private, *event.PullRequest.Head.SHA, *event.PullRequest.Number)
 				s.w.enqueueCheck(j, nil)
 			} else {
 				log.Printf("- ignoring PR from not super user %q", *event.PullRequest.Head.Repo.FullName)
@@ -184,8 +186,9 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 		switch *event.Action {
 		case "created", "edited":
 			// || *event.PullRequest.AuthorAssociation == "CONTRIBUTOR"
-			if s.isSuperUser(*event.Sender.Login) && strings.TrimSpace(*event.Comment.Body) == "gohci" {
-				j := newJobRequest(*event.Repo.Owner.Login, *event.Repo.Name, *event.Repo.Private, *event.PullRequest.Head.SHA, *event.PullRequest.Number)
+			p := s.c.getProject(*event.Repo.Owner.Login, *event.Repo.Name)
+			if p.isSuperUser(*event.Sender.Login) && strings.TrimSpace(*event.Comment.Body) == "gohci" {
+				j := newJobRequest(p, *event.Repo.Private, *event.PullRequest.Head.SHA, *event.PullRequest.Number)
 				s.w.enqueueCheck(j, nil)
 			} else {
 				log.Printf("- ignoring issue #%d comment from user %q", *event.PullRequest.Number, *event.Sender.Login)
@@ -214,21 +217,12 @@ func (s *server) handleHook(w http.ResponseWriter, t string, payload []byte) {
 						blame = []string{author}
 					}
 				}
-				j := newJobRequest(*event.Repo.Owner.Name, *event.Repo.Name, *event.Repo.Private, *event.HeadCommit.ID, 0)
+				p := s.c.getProject(*event.Repo.Owner.Name, *event.Repo.Name)
+				j := newJobRequest(p, *event.Repo.Private, *event.HeadCommit.ID, 0)
 				s.w.enqueueCheck(j, blame)
 			}
 		}
 	default:
 		log.Printf("- ignoring hook type %s", reflect.TypeOf(event).Elem().Name())
 	}
-}
-
-// isSuperUser returns true if the user can trigger tasks.
-func (s *server) isSuperUser(u string) bool {
-	if s.c.isSuperUser(u) {
-		return true
-	}
-	// s.client.Repositories.IsCollaborator() requires *write* access to the
-	// repository, which we really do not want here. So don't even try for now.
-	return false
 }

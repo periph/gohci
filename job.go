@@ -125,9 +125,9 @@ type jobRequest struct {
 	pullID     int    // pullID is the PR ID if relevant
 }
 
-func newJobRequest(org, repo string, useSSH bool, commitHash string, pullID int) *jobRequest {
+func newJobRequest(p *project, useSSH bool, commitHash string, pullID int) *jobRequest {
 	return &jobRequest{
-		p:          &project{Org: org, Repo: repo},
+		p:          p,
 		useSSH:     useSSH,
 		commitHash: commitHash,
 		pullID:     pullID,
@@ -263,10 +263,10 @@ type setupWorkResult struct {
 	ok      bool
 }
 
-func makeFetchDetails(j *jobRequest, altPath string, src string) *fetchDetails {
+func makeFetchDetails(j *jobRequest, src string) *fetchDetails {
 	repoPath := ""
-	if len(altPath) != 0 {
-		repoPath = filepath.Join(src, strings.Replace(altPath, "/", string(os.PathSeparator), -1))
+	if len(j.p.AltPath) != 0 {
+		repoPath = filepath.Join(src, strings.Replace(j.p.AltPath, "/", string(os.PathSeparator), -1))
 	} else {
 		repoURL := "github.com/" + j.p.name()
 		repoPath = filepath.Join(src, strings.Replace(repoURL, "/", string(os.PathSeparator), -1))
@@ -278,11 +278,11 @@ func makeFetchDetails(j *jobRequest, altPath string, src string) *fetchDetails {
 //
 // It aggressively concurrently fetches all repositories in `gopath` to
 // accelerate the processing.
-func runChecks(cmds [][]string, j *jobRequest, altPath string, gopath string, results chan<- gistFile) bool {
+func runChecks(j *jobRequest, gopath string, results chan<- gistFile) bool {
 	start := time.Now()
 	c := make(chan setupWorkResult)
 	src := filepath.Join(gopath, "src")
-	f := makeFetchDetails(j, altPath, src)
+	f := makeFetchDetails(j, src)
 	go func() {
 		defer close(c)
 		f.syncParallel(src, c)
@@ -326,7 +326,7 @@ func runChecks(cmds [][]string, j *jobRequest, altPath string, gopath string, re
 	}
 	ok := true
 	// Finally run the checks!
-	for i, cmd := range cmds {
+	for i, cmd := range j.p.Checks {
 		start = time.Now()
 		stdout, ok2 := run(f.repoPath, cmd...)
 		results <- gistFile{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
@@ -339,9 +339,8 @@ func runChecks(cmds [][]string, j *jobRequest, altPath string, gopath string, re
 }
 
 // runLocal runs the checks run.
-func runLocal(w *worker, gopath, commitHash, test string, update, useSSH bool) error {
-	parts := strings.SplitN(test, "/", 2)
-	j := newJobRequest(parts[0], parts[1], useSSH, commitHash, 0)
+func runLocal(p *project, w *worker, gopath, commitHash string, update, useSSH bool) error {
+	j := newJobRequest(p, useSSH, commitHash, 0)
 	if !update {
 		results := make(chan gistFile)
 		var wg sync.WaitGroup
@@ -356,7 +355,7 @@ func runLocal(w *worker, gopath, commitHash, test string, update, useSSH bool) e
 			}
 		}()
 		fmt.Printf("--- setup-0-metadata\n%s", metadata(commitHash, gopath))
-		success := runChecks(w.c.Checks, j, w.c.AltPath, gopath, results)
+		success := runChecks(j, gopath, results)
 		close(results)
 		wg.Wait()
 		_, err := fmt.Printf("\nSuccess: %t\n", success)

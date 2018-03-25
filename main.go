@@ -66,9 +66,11 @@ func mainImpl() error {
 	// local GOPATH. This is safer as this doesn't modify the host environment.
 	os.Setenv("GOPATH", gopath)
 	os.Setenv("PATH", filepath.Join(gopath, "bin")+string(os.PathListSeparator)+os.Getenv("PATH"))
-	w := newWorker(c, gopath)
+	w := newWorker(c.Name, c.Oauth2AccessToken, gopath)
 	if len(*test) != 0 {
-		return runLocal(w, gopath, *commit, *test, *update, *useSSH)
+		parts := strings.SplitN(*test, "/", 2)
+		p := c.getProject(parts[0], parts[1])
+		return runLocal(p, w, gopath, *commit, *update, *useSSH)
 	}
 	return runServer(c, w, wd, fileName)
 }

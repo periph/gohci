@@ -17,22 +17,22 @@ import (
 
 // worker is the task queue server.
 type worker struct {
-	c      *config
+	name   string // Copy of config.Name
+	gopath string // Working environment.
 	ctx    context.Context
 	client *github.Client // Used to set commit status and create gists.
-	gopath string         // Working environment.
 
 	mu sync.Mutex     // Set when a check is running in runCheck()
 	wg sync.WaitGroup // Set for each pending task.
 }
 
-func newWorker(c *config, gopath string) *worker {
-	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: c.Oauth2AccessToken}))
+func newWorker(name, accessToken, gopath string) *worker {
+	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken}))
 	return &worker{
-		c:      c,
+		name:   name,
+		gopath: gopath,
 		ctx:    context.Background(),
 		client: github.NewClient(tc),
-		gopath: gopath,
 	}
 }
 
@@ -46,8 +46,8 @@ func (w *worker) enqueueCheck(j *jobRequest, blame []string) {
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
 		State:       github.String("pending"),
-		Description: github.String(fmt.Sprintf("Tests pending (0/%d)", len(w.c.Checks)+2)),
-		Context:     &w.c.Name,
+		Description: github.String(fmt.Sprintf("Tests pending (0/%d)", len(j.p.Checks)+2)),
+		Context:     &w.name,
 	}
 	if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.Org, j.p.Repo, j.commitHash, status); err != nil {
 		// Don't bother running the tests.
@@ -75,8 +75,8 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	log.Printf("- Running test for %s at %s", j.p.name(), j.commitHash)
-	total := len(w.c.Checks) + 2
-	gistDesc := fmt.Sprintf("%s for %s", w.c.Name, j)
+	total := len(j.p.Checks) + 2
+	gistDesc := fmt.Sprintf("%s for %s", w.name, j)
 	suffix := fmt.Sprintf(" (0/%d)", total)
 	// https://developer.github.com/v3/gists/#create-a-gist
 	// It is accessible via the URL without authentication even if "private".
@@ -84,7 +84,7 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 		Description: github.String(gistDesc + suffix),
 		Public:      github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
-			"setup-0-metadata": {Content: github.String(metadata(j.commitHash, w.gopath) + "\nCommands to be run:\n" + w.c.cmds())},
+			"setup-0-metadata": {Content: github.String(metadata(j.commitHash, w.gopath) + "\nCommands to be run:\n" + j.p.cmds())},
 		},
 	}
 	gist, _, err := w.client.Gists.Create(w.ctx, gist)
@@ -111,7 +111,7 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 	// code there as this is harmless and still work is people do not care about
 	// security.
 	if failed && len(blame) != 0 {
-		title := fmt.Sprintf("Build %q failed on %s", w.c.Name, j.commitHash)
+		title := fmt.Sprintf("Build %q failed on %s", w.name, j.commitHash)
 		log.Printf("- Failed: %s", title)
 		log.Printf("- Blame: %v", blame)
 		// https://developer.github.com/v3/issues/#create-an-issue
@@ -138,7 +138,7 @@ func (w *worker) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix strin
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
-		runChecks(w.c.Checks, j, w.c.AltPath, w.gopath, results)
+		runChecks(j, w.gopath, results)
 		close(results)
 	}()
 
