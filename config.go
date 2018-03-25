@@ -13,6 +13,15 @@ import (
 	yaml "gopkg.in/yaml.v1"
 )
 
+type project struct {
+	Org  string // Organisation name (e.g. a user)
+	Repo string // Project name
+}
+
+func (p *project) name() string {
+	return p.Org + "/" + p.Repo
+}
+
 type config struct {
 	Port              int        // TCP port number for HTTP server.
 	WebHookSecret     string     // https://developer.github.com/webhooks/

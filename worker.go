@@ -42,14 +42,14 @@ func newWorker(c *config, gopath string) *worker {
 func (w *worker) enqueueCheck(j *jobRequest, blame []string) {
 	w.wg.Add(1)
 	defer w.wg.Done()
-	log.Printf("- Enqueuing test for %s at %s", j.repo(), j.commitHash)
+	log.Printf("- Enqueuing test for %s at %s", j.p.name(), j.commitHash)
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
 		State:       github.String("pending"),
 		Description: github.String(fmt.Sprintf("Tests pending (0/%d)", len(w.c.Checks)+2)),
 		Context:     &w.c.Name,
 	}
-	if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
+	if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.Org, j.p.Repo, j.commitHash, status); err != nil {
 		// Don't bother running the tests.
 		log.Printf("- Failed to create status: %v", err)
 		return
@@ -74,7 +74,7 @@ func (w *worker) enqueueCheck(j *jobRequest, blame []string) {
 func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	log.Printf("- Running test for %s at %s", j.repo(), j.commitHash)
+	log.Printf("- Running test for %s at %s", j.p.name(), j.commitHash)
 	total := len(w.c.Checks) + 2
 	gistDesc := fmt.Sprintf("%s for %s", w.c.Name, j)
 	suffix := fmt.Sprintf(" (0/%d)", total)
@@ -98,7 +98,7 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 	statusDesc := "Running tests"
 	status.TargetURL = gist.HTMLURL
 	status.Description = github.String(statusDesc + suffix)
-	if _, _, err = w.client.Repositories.CreateStatus(w.ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
+	if _, _, err = w.client.Repositories.CreateStatus(w.ctx, j.p.Org, j.p.Repo, j.commitHash, status); err != nil {
 		log.Printf("- Failed to update status: %v", err)
 		return
 	}
@@ -121,13 +121,13 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 			Body:      gist.HTMLURL,
 			Assignees: &blame,
 		}
-		if issue, _, err := w.client.Issues.Create(w.ctx, j.orgName, j.repoName, &issue); err != nil {
+		if issue, _, err := w.client.Issues.Create(w.ctx, j.p.Org, j.p.Repo, &issue); err != nil {
 			log.Printf("- failed to create issue: %v", err)
 		} else {
 			log.Printf("- created issue #%d", *issue.ID)
 		}
 	}
-	log.Printf("- testing done: https://github.com/%s/commit/%s", j.repo(), j.commitHash[:12])
+	log.Printf("- testing done: https://github.com/%s/commit/%s", j.p.name(), j.commitHash[:12])
 }
 
 // runCheckInner is the inner loop of runCheck. It updates gist as the checks
@@ -152,7 +152,7 @@ func (w *worker) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix strin
 				log.Printf("- failed to update gist: %v", err)
 			}
 			gist.Files = map[github.GistFilename]github.GistFile{}
-			if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
+			if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.Org, j.p.Repo, j.commitHash, status); err != nil {
 				log.Printf("- failed to update status: %v", err)
 			}
 			delay = nil
@@ -164,7 +164,7 @@ func (w *worker) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix strin
 						log.Printf("- failed to update gist: %v", err)
 					}
 					gist.Files = map[github.GistFilename]github.GistFile{}
-					if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.orgName, j.repoName, j.commitHash, status); err != nil {
+					if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.Org, j.p.Repo, j.commitHash, status); err != nil {
 						log.Printf("- failed to update status: %v", err)
 					}
 				}

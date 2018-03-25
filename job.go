@@ -119,29 +119,33 @@ func pullRepo(repoPath string) (string, bool) {
 
 // jobRequest is the details to run a verification job.
 type jobRequest struct {
-	orgName    string // orgName is the user part
-	repoName   string // repoName is the repo part
+	p          *project
 	useSSH     bool   // useSSH tells to use ssh instead of https
 	commitHash string // commit hash, not a ref
 	pullID     int    // pullID is the PR ID if relevant
 }
 
-func (j *jobRequest) String() string {
-	if j.pullID != 0 {
-		return fmt.Sprintf("https://github.com/%s/pull/%d at https://github.com/%s/commit/%s", j.repo(), j.pullID, j.repo(), j.commitHash[:12])
+func newJobRequest(org, repo string, useSSH bool, commitHash string, pullID int) *jobRequest {
+	return &jobRequest{
+		p:          &project{Org: org, Repo: repo},
+		useSSH:     useSSH,
+		commitHash: commitHash,
+		pullID:     pullID,
 	}
-	return fmt.Sprintf("https://github.com/%s/commit/%s", j.repo(), j.commitHash[:12])
 }
 
-func (j *jobRequest) repo() string {
-	return j.orgName + "/" + j.repoName
+func (j *jobRequest) String() string {
+	if j.pullID != 0 {
+		return fmt.Sprintf("https://github.com/%s/pull/%d at https://github.com/%s/commit/%s", j.p.name(), j.pullID, j.p.name(), j.commitHash[:12])
+	}
+	return fmt.Sprintf("https://github.com/%s/commit/%s", j.p.name(), j.commitHash[:12])
 }
 
 func (j *jobRequest) cloneURL() string {
 	if j.useSSH {
-		return "git@github.com:" + j.repo()
+		return "git@github.com:" + j.p.name()
 	}
-	return "https://github.com/" + j.repo()
+	return "https://github.com/" + j.p.name()
 }
 
 // commitHashForPR tries to get the HEAD commit for the PR #.
@@ -264,7 +268,7 @@ func makeFetchDetails(j *jobRequest, altPath string, src string) *fetchDetails {
 	if len(altPath) != 0 {
 		repoPath = filepath.Join(src, strings.Replace(altPath, "/", string(os.PathSeparator), -1))
 	} else {
-		repoURL := "github.com/" + j.repo()
+		repoURL := "github.com/" + j.p.name()
 		repoPath = filepath.Join(src, strings.Replace(repoURL, "/", string(os.PathSeparator), -1))
 	}
 	return &fetchDetails{repoPath: repoPath, cloneURL: j.cloneURL(), commitHash: j.commitHash, pullID: j.pullID}
@@ -337,13 +341,7 @@ func runChecks(cmds [][]string, j *jobRequest, altPath string, gopath string, re
 // runLocal runs the checks run.
 func runLocal(w *worker, gopath, commitHash, test string, update, useSSH bool) error {
 	parts := strings.SplitN(test, "/", 2)
-	j := &jobRequest{
-		orgName:    parts[0],
-		repoName:   parts[1],
-		useSSH:     useSSH,
-		commitHash: commitHash,
-		pullID:     0,
-	}
+	j := newJobRequest(parts[0], parts[1], useSSH, commitHash, 0)
 	if !update {
 		results := make(chan gistFile)
 		var wg sync.WaitGroup
