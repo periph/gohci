@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	yaml "gopkg.in/yaml.v1"
+	yaml "gopkg.in/yaml.v2"
 )
 
 type project struct {
