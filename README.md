@@ -90,24 +90,36 @@ gohci
 It will look like this, with comments added here:
 
 ```
-# The TCP port the HTTP server should listen on:
+# The TCP port the HTTP server should listen on. It needs to be "frontend" by an
+# HTTPS enabled proxy, like caddyserver.com
 port: 8080
 # The github webhook secret when receiving events:
 webhooksecret: Create a secret and set it at github.com/user/repo/settings/hooks
 # The github oauth2 client token when updating status and gist:
 oauth2accesstoken: Get one at https://github.com/settings/tokens
 # Name of the worker as presented on the status:
-name: ogre
-# Alternative path to use to checkout the git repository, can be an alternative
-# name like "golang.org/x/tools".
-alt_path: ""
-# Users that can trigger a job on any commit by commenting "gohci: run".
-superusers: []
-# Commands to run:
-checks:
-- - go
-  - test
-  - ./...
+name: raspberrypi
+# A single worker can run tests for multiple projects.
+projects:
+# Define one project per repository.
+- org: user_name
+  repo: repo_name
+  # Alternative path to use to checkout the git repository, can be an
+  # alternative name like "golang.org/x/tools".
+  alt_path: ""
+  # Users that can trigger a job on any commit by commenting "gohci: run".
+  superusers:
+  - maintainer1
+  - maintainer2
+  # Commands to run:
+  checks:
+  - - go
+    - test
+    - ./...
+  - - go
+    - vet
+    - -unsafeptr=false
+    - ./...
 ```
 
 Edit based on your needs. Run `gohci` again and it will start a web server. When
@@ -251,39 +263,6 @@ attacker can:
 ## FAQ
 
 
-### Run `gohci` for multiple repositories on my device?
-
-You have two choices: either one instance runs tests for both repositories or
-you run two separate processes.
-
-To run multiple instances:
-
-- Copy paste `gohci.service` multiple times. Don't duplicate
-  `gohci_update.service` and `gohci_update.timer`, just `gohci.service`!
-- Make each one use a *different* `WorkingDirectory=` value.
-- In each directory, create a `gohci.yml` and use a different `Port`.
-- Register and start the services via systemd via `systemctl` commands [listed
-  above](#systemd).
-- Your `Caddyfile` file should look like the following. You can also run Caddy
-  directly from your Raspberry Pi if you want.
-
-```
-ci.example.com {
-    gzip
-    log log/ci.example.com.log
-    tls youremail@example.com
-    proxy /github/repoA raspberry:8080 {
-      transparent
-      without /github/repoA
-    }
-    proxy /github/repoB raspberry:8081 {
-      transparent
-      without /github/repoB
-    }
-}
-```
-
-
 ### Test on multiple kind of hardware simultaneously?
 
 - Install `gohci` on each of your devices, e.g. a
@@ -292,25 +271,24 @@ ci.example.com {
   Windows, etc.
 - Register multiple webhooks to your repository, one per device, using the
   [explanations](#webhook) above. For each hook, use URLs in the format
-  `https://1.2.3.4/github/repoA/deviceX`.
+  `https://1.2.3.4/gohci/deviceX`.
 - Setup your `Caddyfile` like this:
 
 ```
 ci.example.com {
-    gzip
     log log/ci.example.com.log
     tls youremail@example.com
-    proxy /github/repoA/chip chip:8080 {
+    proxy /gohci/chip chip:8080 {
       transparent
-      without /github/repoA/chip
+      without /gohci/chip
     }
-    proxy /github/repoA/pine64 pine64:8080 {
+    proxy /gohci/pine64 pine64:8080 {
       transparent
-      without /github/repoA/pine64
+      without /gohci/pine64
     }
-    proxy /github/repoA/rpi3 raspberrypi:8080 {
+    proxy /gohci/rpi3 raspberrypi:8080 {
       transparent
-      without /github/repoA/rpi3
+      without /gohci/rpi3
     }
 }
 ```

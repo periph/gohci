@@ -54,11 +54,6 @@ type config struct {
 	Oauth2AccessToken string    // https://github.com/settings/tokens, check "repo:status" and "gist"
 	Name              string    // Display name to use in the status report on Github.
 	Projects          []project // All the projects this workre handles.
-
-	// Old style.
-	AltPath    string     // Alternative package path to use. Defaults to the actual path.
-	SuperUsers []string   // List of github accounts that can trigger a run. In practice any user with write access is a super user but OAuth2 tokens with limited scopes cannot get this information.
-	Checks     [][]string // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
 
 // loadConfig loads the current config or returns the default one.
@@ -112,12 +107,11 @@ func (c *config) getProject(org, repo string) *project {
 			return &c.Projects[i]
 		}
 	}
-	// Old style.
+	// Allow the unconfigured project and only run go test on it, but do not
+	// specify any super user.
 	return &project{
-		Org:        org,
-		Repo:       repo,
-		AltPath:    c.AltPath,
-		SuperUsers: c.SuperUsers,
-		Checks:     c.Checks,
+		Org:    org,
+		Repo:   repo,
+		Checks: [][]string{{"go", "test", "./..."}},
 	}
 }
