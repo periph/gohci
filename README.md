@@ -113,13 +113,19 @@ projects:
   - maintainer2
   # Commands to run:
   checks:
-  - - go
+  - cmd:
+    - go
     - test
+    - -race
     - ./...
-  - - go
+    env:
+    - CGO_ENABLED=0
+  - cmd:
+    - go
     - vet
     - -unsafeptr=false
     - ./...
+    env: []
 ```
 
 Edit based on your needs. Run `gohci` again and it will start a web server. When

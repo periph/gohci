@@ -13,12 +13,19 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
+// check is a single command to run.
+type check struct {
+	Cmd []string // Command to run.
+	Env []string // Optional environment variables to use.
+}
+
+// project defines a github repository being tested.
 type project struct {
-	Org        string     // Organisation name (e.g. a user)
-	Repo       string     // Project name
-	AltPath    string     // Alternative package path to use. Defaults to the actual path.
-	SuperUsers []string   // List of github accounts that can trigger a run. In practice any user with write access is a super user but OAuth2 tokens with limited scopes cannot get this information.
-	Checks     [][]string // Commands to run to test the repository. They are run one after the other from the repository's root.
+	Org        string   // Organisation name (e.g. a user)
+	Repo       string   // Project name
+	AltPath    string   // Alternative package path to use. Defaults to the actual path.
+	SuperUsers []string // List of github accounts that can trigger a run. In practice any user with write access is a super user but OAuth2 tokens with limited scopes cannot get this information.
+	Checks     []check  // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
 
 func (p *project) name() string {
@@ -39,11 +46,14 @@ func (p *project) isSuperUser(u string) bool {
 // indented string.
 func (p *project) cmds() string {
 	cmds := ""
-	for i, cmd := range p.Checks {
+	for i, c := range p.Checks {
 		if i != 0 {
 			cmds += "\n"
 		}
-		cmds += "  " + strings.Join(cmd, " ")
+		if len(c.Env) != 0 {
+			cmds += "  " + strings.Join(c.Env, " ")
+		}
+		cmds += "  " + strings.Join(c.Cmd, " ")
 	}
 	return cmds
 }
@@ -78,8 +88,8 @@ func loadConfig(fileName string) (*config, error) {
 				// Since github user names cannot have a space in it, we know it
 				// doesn't open a security hole.
 				SuperUsers: []string{"admin user1", "admin user2"},
-				Checks: [][]string{
-					{"go", "test", "./..."},
+				Checks: []check{
+					{Cmd: []string{"go", "test", "./..."}},
 				},
 			},
 		},
@@ -110,8 +120,10 @@ func (c *config) getProject(org, repo string) *project {
 	// Allow the unconfigured project and only run go test on it, but do not
 	// specify any super user.
 	return &project{
-		Org:    org,
-		Repo:   repo,
-		Checks: [][]string{{"go", "test", "./..."}},
+		Org:  org,
+		Repo: repo,
+		Checks: []check{
+			{Cmd: []string{"go", "test", "./..."}},
+		},
 	}
 }

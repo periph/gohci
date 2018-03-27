@@ -55,11 +55,24 @@ func roundTime(t time.Duration) time.Duration {
 }
 
 // run runs an executable and returns mangled merged stdout+stderr.
-func run(cwd string, cmd ...string) (string, bool) {
-	cmds := strings.Join(cmd, " ")
+func run(cwd string, env []string, cmd []string) (string, bool) {
+	cmds := strings.Join(env, " ")
+	if len(cmds) != 0 {
+		cmds += " "
+	}
+	cmds += strings.Join(cmd, " ")
 	log.Printf("- cwd=%s : %s", cwd, cmds)
 	c := exec.Command(cmd[0], cmd[1:]...)
 	c.Dir = cwd
+	if len(env) != 0 {
+		oldenv := os.Environ()
+		c.Env = make([]string, len(oldenv), len(oldenv)+len(env))
+		copy(c.Env, oldenv)
+		for _, e := range env {
+			// TODO(maruel): Remove previous existing definition.
+			c.Env = append(c.Env, e)
+		}
+	}
 	start := time.Now()
 	out, err := c.CombinedOutput()
 	duration := time.Since(start)
@@ -104,7 +117,7 @@ func metadata(commit, gopath string) string {
 // pullRepo tries to pull a repository if possible. If the pull failed, it
 // deletes the checkout.
 func pullRepo(repoPath string) (string, bool) {
-	stdout, ok := run(repoPath, "git", "pull", "--prune", "--quiet")
+	stdout, ok := run(repoPath, nil, []string{"git", "pull", "--prune", "--quiet"})
 	if !ok {
 		// Give up and delete the repository. At worst "go get" will fetch
 		// it below.
@@ -153,7 +166,7 @@ func (j *jobRequest) commitHashForPR() bool {
 	if j.pullID == 0 {
 		return false
 	}
-	stdout, ok := run(".", "git", "ls-remote", j.cloneURL())
+	stdout, ok := run(".", nil, []string{"git", "ls-remote", j.cloneURL()})
 	if !ok {
 		return false
 	}
@@ -184,7 +197,7 @@ func (f *fetchDetails) cloneOrFetch(c chan<- setupWorkResult) {
 		return
 	} else if err != nil {
 		// Directory doesn't exist, need to clone.
-		stdout, ok := run(filepath.Dir(f.repoPath), "git", "clone", "--quiet", f.cloneURL)
+		stdout, ok := run(filepath.Dir(f.repoPath), nil, []string{"git", "clone", "--quiet", f.cloneURL})
 		c <- setupWorkResult{stdout, ok}
 		if f.pullID == 0 || !ok {
 			// For PRs, the commit has to be fetched manually.
@@ -197,7 +210,7 @@ func (f *fetchDetails) cloneOrFetch(c chan<- setupWorkResult) {
 	if f.pullID != 0 {
 		args = append(args, fmt.Sprintf("pull/%d/head", f.pullID))
 	}
-	stdout, ok := run(f.repoPath, args...)
+	stdout, ok := run(f.repoPath, nil, args)
 	c <- setupWorkResult{stdout, ok}
 }
 
@@ -313,7 +326,7 @@ func runChecks(j *jobRequest, gopath string, results chan<- gistFile) bool {
 	setupGet := gistFile{name: "setup-2-get", success: true}
 	for _, c := range setupCmds {
 		stdout := ""
-		stdout, setupGet.success = run(f.repoPath, c...)
+		stdout, setupGet.success = run(f.repoPath, nil, c)
 		setupGet.content += stdout
 		if !setupGet.success {
 			break
@@ -326,9 +339,9 @@ func runChecks(j *jobRequest, gopath string, results chan<- gistFile) bool {
 	}
 	ok := true
 	// Finally run the checks!
-	for i, cmd := range j.p.Checks {
+	for i, c := range j.p.Checks {
 		start = time.Now()
-		stdout, ok2 := run(f.repoPath, cmd...)
+		stdout, ok2 := run(f.repoPath, c.Env, c.Cmd)
 		results <- gistFile{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
 		if !ok2 {
 			// Still run the other tests.
