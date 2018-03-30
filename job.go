@@ -54,43 +54,6 @@ func roundTime(t time.Duration) time.Duration {
 	return (t + time.Millisecond/2) / time.Millisecond * time.Millisecond
 }
 
-// run runs an executable and returns mangled merged stdout+stderr.
-func run(cwd string, env []string, cmd []string) (string, bool) {
-	cmds := strings.Join(env, " ")
-	if len(cmds) != 0 {
-		cmds += " "
-	}
-	cmds += strings.Join(cmd, " ")
-	log.Printf("- cwd=%s : %s", cwd, cmds)
-	c := exec.Command(cmd[0], cmd[1:]...)
-	c.Dir = cwd
-	if len(env) != 0 {
-		oldenv := os.Environ()
-		c.Env = make([]string, len(oldenv), len(oldenv)+len(env))
-		copy(c.Env, oldenv)
-		for _, e := range env {
-			// TODO(maruel): Remove previous existing definition.
-			c.Env = append(c.Env, e)
-		}
-	}
-	start := time.Now()
-	out, err := c.CombinedOutput()
-	duration := time.Since(start)
-	exit := 0
-	if err != nil {
-		exit = -1
-		if len(out) == 0 {
-			out = []byte("<failure>\n" + err.Error() + "\n")
-		}
-		if exiterr, ok := err.(*exec.ExitError); ok {
-			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
-				exit = status.ExitStatus()
-			}
-		}
-	}
-	return fmt.Sprintf("$ %s  (exit:%d in %s)\n%s", cmds, exit, roundTime(duration), normalizeUTF8(out)), err == nil
-}
-
 // gistFile is an item in the gist.
 //
 // It represents either the stdout of a command or metadata. They are created
@@ -101,52 +64,50 @@ type gistFile struct {
 	d             time.Duration
 }
 
-// metadata generates the pseudo-file to present information about the worker.
-func metadata(commit, gopath string) string {
-	out := fmt.Sprintf(
-		"Commit:  %s\nCPUs:    %d\nVersion: %s\nGOROOT:  %s\nGOPATH:  %s\nPATH:    %s\n",
-		commit, runtime.NumCPU(), runtime.Version(), runtime.GOROOT(), gopath, os.Getenv("PATH"))
-	if runtime.GOOS != "windows" {
-		if s, err := exec.Command("uname", "-a").CombinedOutput(); err == nil {
-			out += "uname:   " + strings.TrimSpace(string(s)) + "\n"
-		}
-	}
-	return out
-}
-
-// fetchRepo tries to fetch a repository if possible and checks out
-// origin/master as master.
-//
-// If the fetch failed, it deletes the checkout.
-func fetchRepo(repoPath string) (string, bool) {
-	stdout, ok := run(repoPath, nil, []string{"git", "fetch", "--prune", "--quiet", "--all"})
-	if !ok {
-		// Give up and delete the repository. At worst "go get" will fetch
-		// it below.
-		if err := os.RemoveAll(repoPath); err != nil {
-			// Deletion failed, that's a hard failure.
-			return stdout + "<failure>\n" + err.Error() + "\n", false
-		}
-		return stdout + "<recovered failure>\nrm -rf " + repoPath + "\n", true
-	}
-	stdout2, ok2 := run(repoPath, nil, []string{"git", "checkout", "-B", "master", "origin/master"})
-	return stdout + stdout2, ok && ok2
-}
-
 // jobRequest is the details to run a verification job.
 type jobRequest struct {
 	p          *project
-	useSSH     bool   // useSSH tells to use ssh instead of https
-	commitHash string // commit hash, not a ref
-	pullID     int    // pullID is the PR ID if relevant
+	useSSH     bool     // useSSH tells to use ssh instead of https
+	commitHash string   // commit hash, not a ref
+	pullID     int      // pullID is the PR ID if relevant
+	gopath     string   // Cache of GOPATH
+	path       string   // Cache of PATH
+	env        []string // Precomputed environment variables
 }
 
+// newJobRequest creates a new test request for project 'p' on commitHash
+// and/or pullID.
 func newJobRequest(p *project, useSSH bool, commitHash string, pullID int) *jobRequest {
+	wd, err := os.Getwd()
+	if err != nil {
+		// This can't happen.
+		panic(err)
+	}
+	// Organization names cannot contain an underscore so it 'should' be fine.
+	gopath := filepath.Join(wd, p.Org+"_"+p.Repo)
+	path := filepath.Join(gopath, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
+	// Setup the environment variables.
+	oldenv := os.Environ()
+	env := make([]string, 0, len(oldenv))
+	for _, v := range oldenv {
+		if strings.HasPrefix(v, "GOPATH=") || strings.HasPrefix(v, "PATH=") {
+			continue
+		}
+		env = append(env, v)
+	}
+	// GOPATH may not be set especially when running from systemd, so use the
+	// local GOPATH. This is safer as this doesn't modify the host environment.
+	env = append(env, "GOPATH="+gopath)
+	env = append(env, "PATH="+path)
+
 	return &jobRequest{
 		p:          p,
 		useSSH:     useSSH,
 		commitHash: commitHash,
 		pullID:     pullID,
+		gopath:     gopath,
+		path:       path,
+		env:        env,
 	}
 }
 
@@ -169,7 +130,8 @@ func (j *jobRequest) commitHashForPR() bool {
 	if j.pullID == 0 {
 		return false
 	}
-	stdout, ok := run(".", nil, []string{"git", "ls-remote", j.cloneURL()})
+	// TODO(maruel): It fails if the repository had never been checked out.
+	stdout, ok := j.run(j.p.path(), nil, []string{"git", "ls-remote", j.cloneURL()})
 	if !ok {
 		return false
 	}
@@ -184,9 +146,80 @@ func (j *jobRequest) commitHashForPR() bool {
 	return false
 }
 
+// metadata generates the pseudo-file to present information about the worker.
+func (j *jobRequest) metadata() string {
+	out := fmt.Sprintf(
+		"Commit:  %s\nCPUs:    %d\nVersion: %s\nGOROOT:  %s\nGOPATH:  %s\nPATH:    %s\n",
+		j.commitHash, runtime.NumCPU(), runtime.Version(), runtime.GOROOT(), j.gopath, j.path)
+	if runtime.GOOS != "windows" {
+		if s, err := exec.Command("uname", "-a").CombinedOutput(); err == nil {
+			out += "uname:   " + strings.TrimSpace(string(s)) + "\n"
+		}
+	}
+	return out
+}
+
+// run runs an executable and returns mangled merged stdout+stderr.
+func (j *jobRequest) run(relwd string, env []string, cmd []string) (string, bool) {
+	cmds := strings.Join(env, " ")
+	if len(cmds) != 0 {
+		cmds += " "
+	}
+	cmds += strings.Join(cmd, " ")
+	log.Printf("- cwd=%s : %s", relwd, cmds)
+	c := exec.Command(cmd[0], cmd[1:]...)
+	c.Dir = filepath.Join(j.gopath, "src", relwd)
+	// Setup the environment variables.
+	if len(env) != 0 {
+		c.Env = make([]string, 0, len(j.env)+len(env))
+		// TODO(maruel): Remove previous existing definition.
+		c.Env = append(c.Env, env...)
+		c.Env = append(c.Env, j.env...)
+	} else {
+		c.Env = j.env
+	}
+	start := time.Now()
+	out, err := c.CombinedOutput()
+	duration := time.Since(start)
+	exit := 0
+	if err != nil {
+		exit = -1
+		if len(out) == 0 {
+			out = []byte("<failure>\n" + err.Error() + "\n")
+		}
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+				exit = status.ExitStatus()
+			}
+		}
+	}
+	return fmt.Sprintf("%s $ %s  (exit:%d in %s)\n%s",
+		filepath.Join("$GOPATH/src", relwd), cmds, exit, roundTime(duration), normalizeUTF8(out)), err == nil
+}
+
+// fetchRepo tries to fetch a repository if possible and checks out
+// origin/master as master.
+//
+// If the fetch failed, it deletes the checkout.
+func (j *jobRequest) fetchRepo(repoRel string) (string, bool) {
+	stdout, ok := j.run(repoRel, nil, []string{"git", "fetch", "--quiet", "--prune", "--all"})
+	if !ok {
+		repoPath := filepath.Join(j.gopath, "src", repoRel)
+		// Give up and delete the repository. At worst "go get" will fetch
+		// it below.
+		if err := os.RemoveAll(repoPath); err != nil {
+			// Deletion failed, that's a hard failure.
+			return stdout + "<failure>\n" + err.Error() + "\n", false
+		}
+		return stdout + "<recovered failure>\nrm -rf " + repoPath + "\n", true
+	}
+	stdout2, ok2 := j.run(repoRel, nil, []string{"git", "checkout", "-quiet", "-B", "master", "origin/master"})
+	return stdout + stdout2, ok && ok2
+}
+
 // fetchDetails is the details to run a verification job.
 type fetchDetails struct {
-	repoPath   string // repoPath is the absolute path to the repository
+	j          *jobRequest
 	cloneURL   string // cloneURL is the URL to clone for, either ssh or https
 	commitHash string // commit hash, not a ref
 	pullID     int    // pullID is the PR ID if relevant
@@ -195,12 +228,13 @@ type fetchDetails struct {
 // cloneOrFetch is meant to be used on the primary repository, making sure it
 // is checked out at the expected commit or Pull Request.
 func (f *fetchDetails) cloneOrFetch(c chan<- setupWorkResult) {
-	if _, err := os.Stat(f.repoPath); err != nil && !os.IsNotExist(err) {
+	p := filepath.Join(f.j.gopath, "src", f.j.p.path())
+	if _, err := os.Stat(p); err != nil && !os.IsNotExist(err) {
 		c <- setupWorkResult{"<failure>\n" + err.Error() + "\n", false}
 		return
 	} else if err != nil {
 		// Directory doesn't exist, need to clone.
-		stdout, ok := run(filepath.Dir(f.repoPath), nil, []string{"git", "clone", "--quiet", f.cloneURL})
+		stdout, ok := f.j.run(filepath.Dir(f.j.p.path()), nil, []string{"git", "clone", "--quiet", f.cloneURL})
 		c <- setupWorkResult{stdout, ok}
 		if f.pullID == 0 || !ok {
 			// For PRs, the commit has to be fetched manually.
@@ -213,7 +247,7 @@ func (f *fetchDetails) cloneOrFetch(c chan<- setupWorkResult) {
 	if f.pullID != 0 {
 		args = append(args, fmt.Sprintf("pull/%d/head", f.pullID))
 	}
-	stdout, ok := run(f.repoPath, nil, args)
+	stdout, ok := f.j.run(f.j.p.path(), nil, args)
 	c <- setupWorkResult{stdout, ok}
 }
 
@@ -227,10 +261,12 @@ func (f *fetchDetails) cloneOrFetch(c chan<- setupWorkResult) {
 // are already synced to HEAD.
 //
 // cloneURL is fetched into repoPath.
-func (f *fetchDetails) syncParallel(root string, c chan<- setupWorkResult) {
+func (f *fetchDetails) syncParallel(c chan<- setupWorkResult) {
 	// git clone / go get will have a race condition if the directory doesn't
 	// exist.
-	up := filepath.Dir(f.repoPath)
+	root := filepath.Join(f.j.gopath, "src")
+	repoPath := filepath.Join(root, f.j.p.path())
+	up := filepath.Dir(repoPath)
 	err := os.MkdirAll(up, 0700)
 	log.Printf("MkdirAll(%q) -> %v", up, err)
 	if err != nil && !os.IsExist(err) {
@@ -243,12 +279,13 @@ func (f *fetchDetails) syncParallel(root string, c chan<- setupWorkResult) {
 		defer wg.Done()
 		f.cloneOrFetch(c)
 	}()
+
 	// Sync all the repositories concurrently.
 	err = filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if path == f.repoPath {
+		if path == repoPath {
 			// repoPath is handled specifically above.
 			return filepath.SkipDir
 		}
@@ -257,7 +294,7 @@ func (f *fetchDetails) syncParallel(root string, c chan<- setupWorkResult) {
 			wg.Add(1)
 			go func(p string) {
 				defer wg.Done()
-				stdout, ok := fetchRepo(p)
+				stdout, ok := f.j.fetchRepo(p)
 				c <- setupWorkResult{stdout, ok}
 			}(path)
 			return filepath.SkipDir
@@ -279,29 +316,21 @@ type setupWorkResult struct {
 	ok      bool
 }
 
-func makeFetchDetails(j *jobRequest, src string) *fetchDetails {
-	repoPath := ""
-	if len(j.p.AltPath) != 0 {
-		repoPath = filepath.Join(src, strings.Replace(j.p.AltPath, "/", string(os.PathSeparator), -1))
-	} else {
-		repoURL := "github.com/" + j.p.name()
-		repoPath = filepath.Join(src, strings.Replace(repoURL, "/", string(os.PathSeparator), -1))
-	}
-	return &fetchDetails{repoPath: repoPath, cloneURL: j.cloneURL(), commitHash: j.commitHash, pullID: j.pullID}
+func makeFetchDetails(j *jobRequest) *fetchDetails {
+	return &fetchDetails{j: j, cloneURL: j.cloneURL(), commitHash: j.commitHash, pullID: j.pullID}
 }
 
 // runChecks syncs then runs the checks and returns task's results.
 //
 // It aggressively concurrently fetches all repositories in `gopath` to
 // accelerate the processing.
-func runChecks(j *jobRequest, gopath string, results chan<- gistFile) bool {
+func runChecks(j *jobRequest, results chan<- gistFile) bool {
 	start := time.Now()
 	c := make(chan setupWorkResult)
-	src := filepath.Join(gopath, "src")
-	f := makeFetchDetails(j, src)
+	f := makeFetchDetails(j)
 	go func() {
 		defer close(c)
-		f.syncParallel(src, c)
+		f.syncParallel(c)
 	}()
 	setupSync := setupWorkResult{"", true}
 	for i := range c {
@@ -329,7 +358,7 @@ func runChecks(j *jobRequest, gopath string, results chan<- gistFile) bool {
 	setupGet := gistFile{name: "setup-2-get", success: true}
 	for _, c := range setupCmds {
 		stdout := ""
-		stdout, setupGet.success = run(f.repoPath, nil, c)
+		stdout, setupGet.success = j.run(j.p.path(), nil, c)
 		setupGet.content += stdout
 		if !setupGet.success {
 			break
@@ -344,7 +373,7 @@ func runChecks(j *jobRequest, gopath string, results chan<- gistFile) bool {
 	// Finally run the checks!
 	for i, c := range j.p.Checks {
 		start = time.Now()
-		stdout, ok2 := run(f.repoPath, c.Env, c.Cmd)
+		stdout, ok2 := j.run(j.p.path(), c.Env, c.Cmd)
 		results <- gistFile{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
 		if !ok2 {
 			// Still run the other tests.
@@ -355,7 +384,7 @@ func runChecks(j *jobRequest, gopath string, results chan<- gistFile) bool {
 }
 
 // runLocal runs the checks run.
-func runLocal(p *project, w *worker, gopath, commitHash string, update, useSSH bool) error {
+func runLocal(p *project, w *worker, commitHash string, update, useSSH bool) error {
 	j := newJobRequest(p, useSSH, commitHash, 0)
 	if !update {
 		results := make(chan gistFile)
@@ -370,8 +399,8 @@ func runLocal(p *project, w *worker, gopath, commitHash string, update, useSSH b
 				fmt.Printf("--- %s\n%s", i.name, i.content)
 			}
 		}()
-		fmt.Printf("--- setup-0-metadata\n%s", metadata(commitHash, gopath))
-		success := runChecks(j, gopath, results)
+		fmt.Printf("--- setup-0-metadata\n%s", j.metadata())
+		success := runChecks(j, results)
 		close(results)
 		wg.Wait()
 		_, err := fmt.Printf("\nSuccess: %t\n", success)

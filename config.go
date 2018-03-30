@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 
 	yaml "gopkg.in/yaml.v2"
@@ -28,8 +29,17 @@ type project struct {
 	Checks     []check  // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
 
+// name returns the "org/repo" identifier.
 func (p *project) name() string {
 	return p.Org + "/" + p.Repo
+}
+
+// path returns the path to checkout the repository into.
+func (p *project) path() string {
+	if len(p.AltPath) != 0 {
+		return strings.Replace(p.AltPath, "/", string(os.PathSeparator), -1)
+	}
+	return filepath.Join("github.com/" + strings.Replace(p.name(), "/", string(os.PathSeparator), -1))
 }
 
 // isSuperUser returns true if the user can trigger tasks.

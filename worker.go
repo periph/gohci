@@ -18,7 +18,6 @@ import (
 // worker is the task queue server.
 type worker struct {
 	name   string // Copy of config.Name
-	gopath string // Working environment.
 	ctx    context.Context
 	client *github.Client // Used to set commit status and create gists.
 
@@ -26,11 +25,10 @@ type worker struct {
 	wg sync.WaitGroup // Set for each pending task.
 }
 
-func newWorker(name, accessToken, gopath string) *worker {
+func newWorker(name, accessToken string) *worker {
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken}))
 	return &worker{
 		name:   name,
-		gopath: gopath,
 		ctx:    context.Background(),
 		client: github.NewClient(tc),
 	}
@@ -84,7 +82,7 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 		Description: github.String(gistDesc + suffix),
 		Public:      github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
-			"setup-0-metadata": {Content: github.String(metadata(j.commitHash, w.gopath) + "\nCommands to be run:\n" + j.p.cmds())},
+			"setup-0-metadata": {Content: github.String(j.metadata() + "\nCommands to be run:\n" + j.p.cmds())},
 		},
 	}
 	gist, _, err := w.client.Gists.Create(w.ctx, gist)
@@ -138,7 +136,7 @@ func (w *worker) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix strin
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
-		runChecks(j, w.gopath, results)
+		runChecks(j, results)
 		close(results)
 	}()
 
