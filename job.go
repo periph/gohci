@@ -114,10 +114,12 @@ func metadata(commit, gopath string) string {
 	return out
 }
 
-// pullRepo tries to pull a repository if possible. If the pull failed, it
-// deletes the checkout.
-func pullRepo(repoPath string) (string, bool) {
-	stdout, ok := run(repoPath, nil, []string{"git", "pull", "--prune", "--quiet"})
+// fetchRepo tries to fetch a repository if possible and checks out
+// origin/master as master.
+//
+// If the fetch failed, it deletes the checkout.
+func fetchRepo(repoPath string) (string, bool) {
+	stdout, ok := run(repoPath, nil, []string{"git", "fetch", "--prune", "--quiet", "--all"})
 	if !ok {
 		// Give up and delete the repository. At worst "go get" will fetch
 		// it below.
@@ -127,7 +129,8 @@ func pullRepo(repoPath string) (string, bool) {
 		}
 		return stdout + "<recovered failure>\nrm -rf " + repoPath + "\n", true
 	}
-	return stdout, ok
+	stdout2, ok2 := run(repoPath, nil, []string{"git", "checkout", "-B", "master", "origin/master"})
+	return stdout + stdout2, ok && ok2
 }
 
 // jobRequest is the details to run a verification job.
@@ -254,7 +257,7 @@ func (f *fetchDetails) syncParallel(root string, c chan<- setupWorkResult) {
 			wg.Add(1)
 			go func(p string) {
 				defer wg.Done()
-				stdout, ok := pullRepo(p)
+				stdout, ok := fetchRepo(p)
 				c <- setupWorkResult{stdout, ok}
 			}(path)
 			return filepath.SkipDir
