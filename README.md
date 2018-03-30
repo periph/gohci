@@ -136,7 +136,12 @@ continuously restart the service.
 
 ### OAuth2 token
 
-- Visit https://github.com/settings/tokens
+It is preferable to create a bot account any not use your personal account. For
+example, all projects for [periph.io](https://periph.io) are tested with the
+account [github.com/gohci-bot](https://github.com/gohci-bot).
+
+- Visit https://github.com/settings/tokens while logged in with your bot
+  account.
 - Click `Personal access tokens` near the bottom in the left list
 - Click `Generate new token`
 - Add a description like `gohci`
@@ -145,6 +150,16 @@ continuously restart the service.
 - Click `Generate token`
 - Put the hex string into `AccessToken` in `gohci.yml`. This is needed to
   create the gists and put success/failure status on the Pull Requests.
+
+
+### Bot access
+
+The bot must have access to set a [commit
+status](https://help.github.com/articles/about-statuses/).
+
+- As your normal account, add the bot as a 'Write' collaborator.
+  - Sadly 'Write' access is needed even for just status update.
+- Login as the bot account on github and accept the invitation.
 
 
 ### Webhook
