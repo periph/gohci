@@ -212,26 +212,18 @@ func (j *jobRequest) fetchRepo(repoRel string) (string, bool) {
 	return stdout + stdout2, ok && ok2
 }
 
-// fetchDetails is the details to run a verification job.
-type fetchDetails struct {
-	j          *jobRequest
-	cloneURL   string // cloneURL is the URL to clone for, either ssh or https
-	commitHash string // commit hash, not a ref
-	pullID     int    // pullID is the PR ID if relevant
-}
-
 // cloneOrFetch is meant to be used on the primary repository, making sure it
 // is checked out at the expected commit or Pull Request.
-func (f *fetchDetails) cloneOrFetch(c chan<- setupWorkResult) {
-	p := filepath.Join(f.j.gopath, "src", f.j.p.path())
+func (j *jobRequest) cloneOrFetch(c chan<- setupWorkResult) {
+	p := filepath.Join(j.gopath, "src", j.p.path())
 	if _, err := os.Stat(p); err != nil && !os.IsNotExist(err) {
 		c <- setupWorkResult{"<failure>\n" + err.Error() + "\n", false}
 		return
 	} else if err != nil {
 		// Directory doesn't exist, need to clone.
-		stdout, ok := f.j.run(filepath.Dir(f.j.p.path()), nil, []string{"git", "clone", "--quiet", f.cloneURL})
+		stdout, ok := j.run(filepath.Dir(j.p.path()), nil, []string{"git", "clone", "--quiet", j.cloneURL()})
 		c <- setupWorkResult{stdout, ok}
-		if f.pullID == 0 || !ok {
+		if j.pullID == 0 || !ok {
 			// For PRs, the commit has to be fetched manually.
 			return
 		}
@@ -239,10 +231,10 @@ func (f *fetchDetails) cloneOrFetch(c chan<- setupWorkResult) {
 
 	// Directory exists, need to fetch.
 	args := []string{"git", "fetch", "--prune", "--quiet", "origin"}
-	if f.pullID != 0 {
-		args = append(args, fmt.Sprintf("pull/%d/head", f.pullID))
+	if j.pullID != 0 {
+		args = append(args, fmt.Sprintf("pull/%d/head", j.pullID))
 	}
-	stdout, ok := f.j.run(f.j.p.path(), nil, args)
+	stdout, ok := j.run(j.p.path(), nil, args)
 	c <- setupWorkResult{stdout, ok}
 }
 
@@ -256,11 +248,11 @@ func (f *fetchDetails) cloneOrFetch(c chan<- setupWorkResult) {
 // are already synced to HEAD.
 //
 // cloneURL is fetched into repoPath.
-func (f *fetchDetails) syncParallel(c chan<- setupWorkResult) {
+func (j *jobRequest) syncParallel(c chan<- setupWorkResult) {
 	// git clone / go get will have a race condition if the directory doesn't
 	// exist.
-	root := filepath.Join(f.j.gopath, "src")
-	repoPath := filepath.Join(root, f.j.p.path())
+	root := filepath.Join(j.gopath, "src")
+	repoPath := filepath.Join(root, j.p.path())
 	up := filepath.Dir(repoPath)
 	err := os.MkdirAll(up, 0700)
 	log.Printf("MkdirAll(%q) -> %v", up, err)
@@ -272,7 +264,7 @@ func (f *fetchDetails) syncParallel(c chan<- setupWorkResult) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		f.cloneOrFetch(c)
+		j.cloneOrFetch(c)
 	}()
 
 	// Sync all the repositories concurrently.
@@ -288,7 +280,7 @@ func (f *fetchDetails) syncParallel(c chan<- setupWorkResult) {
 			wg.Add(1)
 			go func(p string) {
 				defer wg.Done()
-				stdout, ok := f.j.fetchRepo(p)
+				stdout, ok := j.fetchRepo(p)
 				c <- setupWorkResult{stdout, ok}
 			}(filepath.Dir(path)[len(root)+1:])
 			return filepath.SkipDir
@@ -310,10 +302,6 @@ type setupWorkResult struct {
 	ok      bool
 }
 
-func makeFetchDetails(j *jobRequest) *fetchDetails {
-	return &fetchDetails{j: j, cloneURL: j.cloneURL(), commitHash: j.commitHash, pullID: j.pullID}
-}
-
 // runChecks syncs then runs the checks and returns task's results.
 //
 // It aggressively concurrently fetches all repositories in `gopath` to
@@ -321,10 +309,9 @@ func makeFetchDetails(j *jobRequest) *fetchDetails {
 func runChecks(j *jobRequest, results chan<- gistFile) bool {
 	start := time.Now()
 	c := make(chan setupWorkResult)
-	f := makeFetchDetails(j)
 	go func() {
 		defer close(c)
-		f.syncParallel(c)
+		j.syncParallel(c)
 	}()
 	setupSync := setupWorkResult{"", true}
 	for i := range c {
