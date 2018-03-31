@@ -77,12 +77,7 @@ type jobRequest struct {
 
 // newJobRequest creates a new test request for project 'p' on commitHash
 // and/or pullID.
-func newJobRequest(p *project, useSSH bool, commitHash string, pullID int) *jobRequest {
-	wd, err := os.Getwd()
-	if err != nil {
-		// This can't happen.
-		panic(err)
-	}
+func newJobRequest(p *project, useSSH bool, wd, commitHash string, pullID int) *jobRequest {
 	// Organization names cannot contain an underscore so it 'should' be fine.
 	gopath := filepath.Join(wd, p.Org+"_"+p.Repo)
 	path := filepath.Join(gopath, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
@@ -166,7 +161,7 @@ func (j *jobRequest) run(relwd string, env []string, cmd []string) (string, bool
 		cmds += " "
 	}
 	cmds += strings.Join(cmd, " ")
-	log.Printf("- cwd=%s : %s", relwd, cmds)
+	log.Printf("- relwd=%s : %s", relwd, cmds)
 	c := exec.Command(cmd[0], cmd[1:]...)
 	c.Dir = filepath.Join(j.gopath, "src", relwd)
 	// Setup the environment variables.
@@ -290,13 +285,12 @@ func (f *fetchDetails) syncParallel(c chan<- setupWorkResult) {
 			return filepath.SkipDir
 		}
 		if fi.Name() == ".git" {
-			path = filepath.Dir(path)
 			wg.Add(1)
 			go func(p string) {
 				defer wg.Done()
 				stdout, ok := f.j.fetchRepo(p)
 				c <- setupWorkResult{stdout, ok}
-			}(path)
+			}(filepath.Dir(path)[len(root)+1:])
 			return filepath.SkipDir
 		}
 		return nil
@@ -384,8 +378,8 @@ func runChecks(j *jobRequest, results chan<- gistFile) bool {
 }
 
 // runLocal runs the checks run.
-func runLocal(p *project, w *worker, commitHash string, update, useSSH bool) error {
-	j := newJobRequest(p, useSSH, commitHash, 0)
+func runLocal(p *project, w *worker, wd, commitHash string, update, useSSH bool) error {
+	j := newJobRequest(p, useSSH, wd, commitHash, 0)
 	if !update {
 		results := make(chan gistFile)
 		var wg sync.WaitGroup

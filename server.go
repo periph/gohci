@@ -39,7 +39,7 @@ func runServer(c *config, wkr *worker, wd, fileName string) error {
 	ln.Close()
 	log.Printf("Listening on: %s", a)
 
-	s := &server{c: c, w: wkr, start: time.Now()}
+	s := &server{c: c, w: wkr, wd: wd, start: time.Now()}
 	http.Handle("/", s)
 	go http.ListenAndServe(a, nil)
 
@@ -72,6 +72,7 @@ func runServer(c *config, wkr *worker, wd, fileName string) error {
 type server struct {
 	c     *config
 	w     *worker
+	wd    string
 	start time.Time
 }
 
@@ -148,7 +149,7 @@ func (s *server) handleCommitComment(e *github.CommitCommentEvent) {
 		return
 	}
 	// TODO(maruel): The commit could be on a branch never fetched?
-	j := newJobRequest(p, *e.Repo.Private, *e.Comment.CommitID, 0)
+	j := newJobRequest(p, *e.Repo.Private, s.wd, *e.Comment.CommitID, 0)
 	s.w.enqueueCheck(j, nil)
 }
 
@@ -173,7 +174,7 @@ func (s *server) handleIssueComment(e *github.IssueCommentEvent) {
 		return
 	}
 	// The commit hash is not provided. :(
-	j := newJobRequest(p, *e.Repo.Private, "", *e.Issue.Number)
+	j := newJobRequest(p, *e.Repo.Private, s.wd, "", *e.Issue.Number)
 	// Immediately fetch the issue head commit inside the webhook, since
 	// it's a race condition.
 	if !j.commitHashForPR() {
@@ -197,7 +198,7 @@ func (s *server) handlePullRequest(e *github.PullRequestEvent) {
 		log.Printf("- ignoring PR from not super user %q", *e.PullRequest.Head.Repo.FullName)
 		return
 	}
-	j := newJobRequest(p, *e.Repo.Private, *e.PullRequest.Head.SHA, *e.PullRequest.Number)
+	j := newJobRequest(p, *e.Repo.Private, s.wd, *e.PullRequest.Head.SHA, *e.PullRequest.Number)
 	s.w.enqueueCheck(j, nil)
 }
 
@@ -213,7 +214,7 @@ func (s *server) handlePullRequestReviewComment(e *github.PullRequestReviewComme
 		log.Printf("- ignoring issue #%d comment from user %q", *e.PullRequest.Number, *e.Sender.Login)
 		return
 	}
-	j := newJobRequest(p, *e.Repo.Private, *e.PullRequest.Head.SHA, *e.PullRequest.Number)
+	j := newJobRequest(p, *e.Repo.Private, s.wd, *e.PullRequest.Head.SHA, *e.PullRequest.Number)
 	s.w.enqueueCheck(j, nil)
 }
 
@@ -241,6 +242,6 @@ func (s *server) handlePush(e *github.PushEvent) {
 		}
 	}
 	p := s.c.getProject(*e.Repo.Owner.Name, *e.Repo.Name)
-	j := newJobRequest(p, *e.Repo.Private, *e.HeadCommit.ID, 0)
+	j := newJobRequest(p, *e.Repo.Private, s.wd, *e.HeadCommit.ID, 0)
 	s.w.enqueueCheck(j, blame)
 }

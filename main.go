@@ -50,6 +50,9 @@ func mainImpl() error {
 			*commit = "HEAD"
 		}
 	}
+	defer func() {
+		log.Printf("Shutting down")
+	}()
 	fileName := "gohci.yml"
 	c, err := loadConfig(fileName)
 	if err != nil {
@@ -64,7 +67,7 @@ func mainImpl() error {
 	if len(*test) != 0 {
 		parts := strings.SplitN(*test, "/", 2)
 		p := c.getProject(parts[0], parts[1])
-		return runLocal(p, w, *commit, *update, *useSSH)
+		return runLocal(p, w, wd, *commit, *update, *useSSH)
 	}
 	return runServer(c, w, wd, fileName)
 }
