@@ -29,6 +29,7 @@ func runServer(c *config, wkr *worker, wd, fileName string) error {
 	log.Printf("Running in: %s", wd)
 	log.Printf("Executable: %s", thisFile)
 	log.Printf("Name: %s", c.Name)
+	log.Printf("PATH: %s", os.Getenv("PATH"))
 
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", c.Port))
 	if err != nil {
