@@ -208,7 +208,7 @@ func (j *jobRequest) fetchRepo(repoRel string) (string, bool) {
 		}
 		return stdout + "<recovered failure>\nrm -rf " + repoPath + "\n", true
 	}
-	stdout2, ok2 := j.run(repoRel, nil, []string{"git", "checkout", "-quiet", "-B", "master", "origin/master"})
+	stdout2, ok2 := j.run(repoRel, nil, []string{"git", "checkout", "--quiet", "-B", "master", "origin/master"})
 	return stdout + stdout2, ok && ok2
 }
 
