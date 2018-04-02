@@ -2,15 +2,24 @@
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/periph/gohci)](https://goreportcard.com/report/github.com/periph/gohci)
 
-*   [Genesis](#genesis)
-*   [Pictures](#pictures)
-*   [Design](#design)
-*   [Features](#features)
-*   [Installation](#installation)
-*   [Private repository](#private-repository)
-*   [Testing](#testing)
-*   [Security](#security)
-*   [FAQ](#faq)
+- [Genesis](#genesis)
+- [Pictures](#pictures)
+- [Design](#design)
+- [Features](#features)
+- [Initial Setup](#initial-setup)
+  - [OAuth2 token](#oauth2-token)
+  - [Project access](#project-access)
+  - [Webhook](#webhook)
+- [Worker Setup](#worker-setup)
+  - [Debian](#debian)
+  - [Windows](#windows)
+  - [macOS](#macos)
+  - [Configuration](#configuration)
+  - [Private repository](#private-repository)
+- [Private repository](#private-repository)
+- [Testing](#testing)
+- [Security](#security)
+- [FAQ](#faq)
 
 
 ## Genesis
@@ -65,79 +74,29 @@ It hardly can get any simpler:
 
 ## Features
 
+- Each worker can test multiple repositories, each with custom checks.
 - Each check's stdout is "_streamed_" to the gist as they complete.
 - The commit's status is updated "_live_" on Github. This is pretty cool to see
   in action on a github PR.
 - Trivial to run as a low maintenance systemd service.
 - Designed to work great on a single core ARM CPU with minimal memory
   requirements.
+- Works on Windows and macOS.
 - `gohci` exits whenever the executable or `gohci.yml` is updated; making it
   easy to use an auto-updating mechanism.
-- Works on Windows.
 
 
-## Installation
+## Initial Setup
 
-**`gohci` requires Go 1.8**
-
-Install and create the default `gohci.yml`:
-
-```
-go get periph.io/x/gohci
-gohci
-```
-
-It will look like this, with comments added here:
-
-```
-# The TCP port the HTTP server should listen on. It needs to be "frontend" by an
-# HTTPS enabled proxy, like caddyserver.com
-port: 8080
-# The github webhook secret when receiving events:
-webhooksecret: Create a secret and set it at github.com/user/repo/settings/hooks
-# The github oauth2 client token when updating status and gist:
-oauth2accesstoken: Get one at https://github.com/settings/tokens
-# Name of the worker as presented on the status:
-name: raspberrypi
-# A single worker can run tests for multiple projects.
-projects:
-# Define one project per repository.
-- org: user_name
-  repo: repo_name
-  # Alternative path to use to checkout the git repository, can be an
-  # alternative name like "golang.org/x/tools".
-  alt_path: ""
-  # Users that can trigger a job on any commit by commenting "gohci: run".
-  superusers:
-  - maintainer1
-  - maintainer2
-  # Commands to run:
-  checks:
-  - cmd:
-    - go
-    - test
-    - -race
-    - ./...
-    env:
-    - CGO_ENABLED=0
-  - cmd:
-    - go
-    - vet
-    - -unsafeptr=false
-    - ./...
-    env: []
-```
-
-Edit based on your needs. Run `gohci` again and it will start a web server. When
-`gohci` is running, updating `gohci.yml` will make the process quit. It is
-assumed that you use a service manager, like systemd or a bash/batch file that
-continuously restart the service.
+Before starting the worker, some initial configuration is necessary.
 
 
 ### OAuth2 token
 
-It is preferable to create a bot account any not use your personal account. For
-example, all projects for [periph.io](https://periph.io) are tested with the
+It is preferable to create a bot account and not use your personal account.
+GitHub ToS calls it ['machine
+account'](https://help.github.com/articles/github-terms-of-service/#2-account-requirements).
+For example, all projects for [periph.io](https://periph.io) are tested with the
 account [github.com/gohci-bot](https://github.com/gohci-bot).
 
 - Visit https://github.com/settings/tokens while logged in with your bot
@@ -152,12 +111,12 @@ account [github.com/gohci-bot](https://github.com/gohci-bot).
   create the gists and put success/failure status on the Pull Requests.
 
 
-### Bot access
+### Project access
 
-The bot must have access to set a [commit
+The bot account must have access to set a [commit
 status](https://help.github.com/articles/about-statuses/).
 
-- As your normal account, add the bot as a 'Write' collaborator.
+- As your normal account, add the bot account as a 'Write' collaborator.
   - Sadly 'Write' access is needed even for just status update.
 - Login as the bot account on github and accept the invitation.
 
@@ -166,82 +125,164 @@ status](https://help.github.com/articles/about-statuses/).
 
 Visit to `github.com/user/repo/settings/hooks` and create a new webhook.
 
-- Use your worker IP address or hostname as the hook URL,
-  `https://1.2.3.4/github/repoA`.
+- Payload URL: Use your worker IP address or hostname as the hook URL,
+  `https://1.2.3.4/gohci/workerA`.
+- Content type: select 'application/json'.
 - Type a random string, that you will put in `WebHookSecret` in `gohci.yml`.
 - Click `Let me select individual events` and check: `Commit comment`, `Issue
   Comment`, `Pull request`, `Pull request review`, `Pull request review comment`
   and `Push`.
+- Keep the tab open but don't enable it yet; enable the webhook once the worker
+  is up and running.
 
 
-### systemd: Running automatically and auto-update
+## Worker Setup
 
-Setting up as systemd means it'll run automatically. The following is
-preconfigured for a `pi` user. Edit as necessary, which is necessary if you run
-your own Go version instead of the debian package.
+Now it's time to setup the worker itself.
 
-As root:
+**`gohci` requires Go 1.8**
+
+
+### Debian
+
+This includes Raspbian and Ubuntu.
+
+- Install [Go](https://golang.org/dl).
+  - The Go version in packages is kinda old, so it's preferable to install a
+    recent version.
+  - See [official instructions](https://golang.org/doc/install#install) for
+    help.
+- Setup `$PATH` to include `~/go/bin`
+- Install git.
+- Install `gohci`.
+- Create the directory `gohci`.
+- Set up the system to run `gohci` automatically and update it every
+  day via [`systemd/setup.sh`](systemd/setup.sh) .
+
+Overall it looks like this:
 
 ```
-cp systemd/* /etc/systemd/system
-systemctl daemon-reload
-systemctl enable gohci.service
-systemctl enable gohci_update.timer
-systemctl start gohci.service
-systemctl start gohci_update.timer
+sudo apt install git
+export PATH="$PATH:$HOME/go/bin"
+echo 'export PATH="$PATH:$HOME/go/bin"' >> ~/.bash_aliases
+go get -u -v periph.io/x/gohci
+mkdir -p ~/gohci
+$HOME/go/src/periph.io/x/gohci/systemd/setup.sh
 ```
-
-`gohci_update.timer` runs `gohci_update.service` every 10 minutes.
 
 
 ### Windows
 
-
-`gohci` works on Windows!
-
-
-#### Windows: Running automatically
-
-- First enable auto-login on a fresh low privilege account.
+- Install [Go](https://golang.org/dl).
+  - Setup `PATH` to include `%USERPROFILE%\go\bin`
+  - See [official instructions](https://golang.org/doc/install#install) for
+    help.
+- Install [git](https://git-scm.com)
+- First enable auto-login (optionally on a fresh low privilege account).
+  - Win-R
+  - `netplwiz`
+  - Uncheck _Users must enter a user name and password to use this computer_.
+  - OK
+  - Type password twice.
 - Create a batch file `%APPDATA%\Microsoft\Windows\Start
   Menu\Programs\Startup\gohci.bat` that contains the following:
-
-```
-@echo off
-cd c:\path\to\work\dir
-:loop
-gohci
-goto loop
-```
-
-#### Windows: Auto update
-
-Auto-update can be done via the task scheduler. The following command will
-auto-update `gohci` every 10 minutes:
-
-```
-schtasks /create /tn "Update gohci" /tr "go get -v -u periph.io/x/gohci" /sc minute /mo 10
-```
-
-The task should show up with: `schtasks /query /fo table | more` or navigating
-the GUI with `taskschd.msc`.
-
-
-### OSX
-
-Create a `gohci` standard account and set it to auto-login upon boot. Use the
-included `gohci.yml` to set it to automatically start upon login:
-
-```
-mkdir -p ~/Library/LaunchAgents
-cp osx/gohci.plist ~/Library/LaunchAgents
-mkdir gohci
-```
-
-Create `~/gohci/gohci.yml` with the relevant configuration as described above.
+  ```
+  @echo off
+  title gohci
+  cd %USERPROFILE%\gohci
+  :loop
+  gohci
+  goto loop
+  ```
+- Auto-update can be done via the task scheduler. The following command will
+  auto-update `gohci` every day:
+  ```
+  schtasks /create /tn "Update gohci" /tr "go get -v -u periph.io/x/gohci" /sc minute /mo 1439
+  ```
+  - The task should show up with: `schtasks /query /fo table | more` or
+    navigating the GUI with `taskschd.msc`.
+- Open `cmd` and run:
+  ```
+  go get -u -v periph.io/x/gohci
+  mkdir %USERPROFILE%/gohci
+  cd %USERPROFILE%/gohci
+  ```
+- Run `gohci` twice to make sure the firewall popup is shown and you allow the
+  app.
 
 
-## Private repository
+### macOS
+
+- Install [Xcode](https://developer.apple.com/xcode/) (which includes git).
+- Install [Go](https://golang.org/dl).
+  - See [official instructions](https://golang.org/doc/install#install) for
+    help.
+- Install [Homebrew](https://brew.sh) (optional).
+- Create a `gohci` standard account (optional).
+- Install `gohci` and setup for auto-start:
+  ```
+  go get -u -v periph.io/x/gohci
+  mkdir -p ~/Library/LaunchAgents
+  cp $HOME/go/src/periph.io/x/gohci/macos/gohci.plist ~/Library/LaunchAgents
+  mkdir -p ~/gohci
+  ```
+- Enable auto-login via system preferences.
+
+
+### Configuration
+
+- Create `~/gohci/gohci.yml` with the default configuration:
+  ```
+  cd gohci
+  gohci
+  ```
+- It will look like this, with comments added here:
+  ```
+  # The TCP port the HTTP server should listen on. It needs to be "frontend" by an
+  # HTTPS enabled proxy, like caddyserver.com
+  port: 8080
+  # The github webhook secret when receiving events:
+  webhooksecret: Create a secret and set it at github.com/user/repo/settings/hooks
+  # The github oauth2 client token when updating status and gist:
+  oauth2accesstoken: Get one at https://github.com/settings/tokens
+  # Name of the worker as presented on the status:
+  name: raspberrypi
+  # A single worker can run tests for multiple projects.
+  projects:
+  # Define one project per repository.
+  - org: user_name
+    repo: repo_name
+    # Alternative path to use to checkout the git repository, can be an
+    # alternative name like "golang.org/x/tools".
+    alt_path: ""
+    # Users that can trigger a job on any commit by commenting "gohci: run".
+    superusers:
+    - maintainer1
+    - maintainer2
+    # Commands to run:
+    checks:
+    - cmd:
+      - go
+      - test
+      - -race
+      - ./...
+    - cmd:
+      - go
+      - vet
+      - -unsafeptr=false
+      - ./...
+      env: []
+  ```
+-  Edit based on your needs.
+- Run `gohci` again and it will start a web server. When `gohci` is running,
+  updating `gohci.yml` will make the process quit (after completing any enqueued
+  checks).
+- Reboot the host and make sure `gohci` starts correctly.
+- Enable the webhook.
+- Push a commit to confirm it works!
+
+
+### Private repository
 
 `gohci` will automatically switch from HTTPS to SSH checkout when the repository
 is private. For it to work you must:
@@ -317,23 +358,17 @@ ci.example.com {
 
 ### What are the rules about which PRs are tested?
 
-By default, `RunForPRsFromFork` is `false`, which means that PRs that do come
-from a forked repository are not tested automatically. If `RunForPRsFromFork` is
-set to `true`, all PRs are tested. This increase your attack surface as your
-worker litterally run random code. This is not recommended.
-
-The default rule is that only PRs coming from the own repo (not a fork) will be
-automatically tested, plus any push to the repository.
+By default, only commits in branches on the repository are tested but not PRs.
 
 You can specify `SuperUsers` to allow all PRs created by these users to be
-tested automatically. These users can also comment `gohci: run` on any commit
-which will trigger a test run.
+tested automatically. These users can also comment `gohci` on any commit or PR
+to trigger a test run.
 
 
 ### Won't the auto-updater break my CI when you push broken code?
 
-Yes. I'll try to keep `gohci` always in a working condition but it can fail from
-time to time. So feel free to fork the `gohci` repository and run from your
+Maybe. I'll try to keep `gohci` always in a working condition but it can fail
+from time to time. So feel free to fork the `gohci` repository and run from your
 copy. Don't forget to update `gohci_update.timer` to pull from your repository
 instead.
 

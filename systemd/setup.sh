@@ -11,21 +11,12 @@
 
 set -eu
 
-if [ ! $# -eq 1 ]; then
-  echo "Usage: $0 <suffix>"
-  echo ""
-  echo " suffix should be something like '_project'"
-  exit 2
-fi
-
-SUFFIX=$1
-
 go get -u -v periph.io/x/gohci
 
-mkdir /home/${USER}/gohci${SUFFIX}
+mkdir /home/${USER}/gohci
 
 
-sudo tee /etc/systemd/system/gohci${SUFFIX}.service << EOF
+sudo tee /etc/systemd/system/gohci.service << EOF
 # Created by https://github.com/periph/gohci/blob/master/systemd/setup.sh
 [Unit]
 Description=Go on Hardware CI
@@ -38,7 +29,7 @@ KillMode=mixed
 Restart=always
 TimeoutStopSec=20s
 ExecStart=/home/${USER}/go/bin/gohci
-WorkingDirectory=/home/${USER}/gohci${SUFFIX}
+WorkingDirectory=/home/${USER}/gohci
 Environment=PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 [Install]
 WantedBy=default.target
@@ -66,7 +57,7 @@ sudo tee /etc/systemd/system/gohci_update.timer << EOF
 Description=Runs "go get -u periph.io/x/gohci" as a cron job
 [Timer]
 OnBootSec=1min
-OnUnitActiveSec=10min
+OnUnitActiveSec=1440min
 RandomizedDelaySec=5
 [Install]
 WantedBy=timers.target
@@ -74,5 +65,5 @@ EOF
 
 sudo systemctl daemon-reload
 sudo systemctl enable gohci_update.timer
-sudo systemctl enable gohci${SUFFIX}.service
-sudo systemctl start gohci${SUFFIX}.service
+sudo systemctl enable gohci.service
+sudo systemctl start gohci.service
