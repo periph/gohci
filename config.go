@@ -5,10 +5,12 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	yaml "gopkg.in/yaml.v2"
@@ -109,6 +111,10 @@ func loadConfig(fileName string) (*config, error) {
 		b, err = yaml.Marshal(c)
 		if err != nil {
 			return nil, err
+		}
+		// Makes it editable in notepad.exe.
+		if runtime.GOOS == "windows" {
+			b = bytes.Replace(b, []byte("\n"), []byte("\r\n"), -1)
 		}
 		if err = ioutil.WriteFile(fileName, b, 0600); err != nil {
 			return nil, err
