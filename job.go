@@ -173,9 +173,14 @@ func (j *jobRequest) run(relwd string, env []string, cmd []string) (string, bool
 	} else {
 		c.Env = j.env
 	}
+	// Wrap the call with PATH override. The calling process PATH environment
+	// variable is used when looking for the executable in the child process.
+	oldpath := os.Getenv("PATH")
+	os.Setenv("PATH", j.path)
 	start := time.Now()
 	out, err := c.CombinedOutput()
 	duration := time.Since(start)
+	os.Setenv("PATH", oldpath)
 	exit := 0
 	if err != nil {
 		exit = -1
