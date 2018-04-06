@@ -22,6 +22,8 @@ import (
 // conflicting.
 const gohciBranch = "_gohci"
 
+var muCmd sync.Mutex
+
 // normalizeUTF8 returns valid UTF8 from potentially incorrectly encoded data
 // from an untrusted process.
 func normalizeUTF8(b []byte) []byte {
@@ -52,6 +54,23 @@ func roundTime(t time.Duration) time.Duration {
 	}
 	// Round at 1ms
 	return (t + time.Millisecond/2) / time.Millisecond * time.Millisecond
+}
+
+// Wrap the exec.Command() call with PATH value override.
+//
+// exec.Command() calls exec.Lookup() right away, and there is no way to
+// override the PATH variable used by exec.Lookup(), so the process' value
+// must be temporarily changed.
+func getCmd(path string, cmd []string) *exec.Cmd {
+	muCmd.Lock()
+	defer muCmd.Unlock()
+	if path != "" {
+		oldpath := os.Getenv("PATH")
+		os.Setenv("PATH", path)
+		// Restore PATH.
+		defer func() { os.Setenv("PATH", oldpath) }()
+	}
+	return exec.Command(cmd[0], cmd[1:]...)
 }
 
 // gistFile is an item in the gist.
@@ -126,7 +145,7 @@ func (j *jobRequest) commitHashForPR() bool {
 		return false
 	}
 	// TODO(maruel): It fails if the repository had never been checked out.
-	stdout, ok := j.run(j.p.path(), nil, []string{"git", "ls-remote", j.cloneURL()})
+	stdout, ok := j.run(j.p.path(), nil, []string{"git", "ls-remote", j.cloneURL()}, false)
 	if !ok {
 		return false
 	}
@@ -155,25 +174,21 @@ func (j *jobRequest) metadata() string {
 }
 
 // run runs an executable and returns mangled merged stdout+stderr.
-func (j *jobRequest) run(relwd string, env []string, cmd []string) (string, bool) {
+//
+// Use pathOverride when running checks.
+func (j *jobRequest) run(relwd string, env []string, cmd []string, pathOverride bool) (string, bool) {
 	cmds := strings.Join(env, " ")
 	if len(cmds) != 0 {
 		cmds += " "
 	}
 	cmds += strings.Join(cmd, " ")
 	log.Printf("- relwd=%s : %s", relwd, cmds)
-
-	// Wrap the exec.Command() call with PATH value override.
-	//
-	// exec.Command() calls exec.Lookup() right away, and there is no way to
-	// override the PATH variable used by exec.Lookup(), so the process' value
-	// must be temporarily changed.
-	oldpath := os.Getenv("PATH")
-	os.Setenv("PATH", j.path)
-	c := exec.Command(cmd[0], cmd[1:]...)
-	// Restore PATH.
-	os.Setenv("PATH", oldpath)
-
+	var c *exec.Cmd
+	if pathOverride {
+		c = getCmd(j.path, cmd)
+	} else {
+		c = getCmd("", cmd)
+	}
 	c.Dir = filepath.Join(j.gopath, "src", relwd)
 	// Setup the environment variables.
 	if len(env) != 0 {
@@ -208,7 +223,7 @@ func (j *jobRequest) run(relwd string, env []string, cmd []string) (string, bool
 //
 // If the fetch failed, it deletes the checkout.
 func (j *jobRequest) fetchRepo(repoRel string) (string, bool) {
-	stdout, ok := j.run(repoRel, nil, []string{"git", "fetch", "--quiet", "--prune", "--all"})
+	stdout, ok := j.run(repoRel, nil, []string{"git", "fetch", "--quiet", "--prune", "--all"}, false)
 	if !ok {
 		repoPath := filepath.Join(j.gopath, "src", repoRel)
 		// Give up and delete the repository. At worst "go get" will fetch
@@ -219,7 +234,7 @@ func (j *jobRequest) fetchRepo(repoRel string) (string, bool) {
 		}
 		return stdout + "<recovered failure>\nrm -rf " + repoPath + "\n", true
 	}
-	stdout2, ok2 := j.run(repoRel, nil, []string{"git", "checkout", "--quiet", "-B", "master", "origin/master"})
+	stdout2, ok2 := j.run(repoRel, nil, []string{"git", "checkout", "--quiet", "-B", "master", "origin/master"}, false)
 	return stdout + stdout2, ok && ok2
 }
 
@@ -232,7 +247,7 @@ func (j *jobRequest) cloneOrFetch(c chan<- setupWorkResult) {
 		return
 	} else if err != nil {
 		// Directory doesn't exist, need to clone.
-		stdout, ok := j.run(filepath.Dir(j.p.path()), nil, []string{"git", "clone", "--quiet", j.cloneURL()})
+		stdout, ok := j.run(filepath.Dir(j.p.path()), nil, []string{"git", "clone", "--quiet", j.cloneURL()}, false)
 		c <- setupWorkResult{stdout, ok}
 		if j.pullID == 0 || !ok {
 			// For PRs, the commit has to be fetched manually.
@@ -245,7 +260,7 @@ func (j *jobRequest) cloneOrFetch(c chan<- setupWorkResult) {
 	if j.pullID != 0 {
 		args = append(args, fmt.Sprintf("pull/%d/head", j.pullID))
 	}
-	stdout, ok := j.run(j.p.path(), nil, args)
+	stdout, ok := j.run(j.p.path(), nil, args, false)
 	c <- setupWorkResult{stdout, ok}
 }
 
@@ -350,7 +365,7 @@ func runChecks(j *jobRequest, results chan<- gistFile) bool {
 	setupGet := gistFile{name: "setup-2-get", success: true}
 	for _, c := range setupCmds {
 		stdout := ""
-		stdout, setupGet.success = j.run(j.p.path(), nil, c)
+		stdout, setupGet.success = j.run(j.p.path(), nil, c, false)
 		setupGet.content += stdout
 		if !setupGet.success {
 			break
@@ -365,7 +380,7 @@ func runChecks(j *jobRequest, results chan<- gistFile) bool {
 	// Finally run the checks!
 	for i, c := range j.p.Checks {
 		start = time.Now()
-		stdout, ok2 := j.run(j.p.path(), c.Env, c.Cmd)
+		stdout, ok2 := j.run(j.p.path(), c.Env, c.Cmd, true)
 		results <- gistFile{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
 		if !ok2 {
 			// Still run the other tests.
