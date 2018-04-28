@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -378,10 +379,11 @@ func runChecks(j *jobRequest, results chan<- gistFile) bool {
 	}
 	ok := true
 	// Finally run the checks!
+	nb := len(strconv.Itoa(len(j.p.Checks)))
 	for i, c := range j.p.Checks {
 		start = time.Now()
 		stdout, ok2 := j.run(j.p.path(), c.Env, c.Cmd, true)
-		results <- gistFile{fmt.Sprintf("cmd%d", i+1), stdout, ok2, time.Since(start)}
+		results <- gistFile{fmt.Sprintf("cmd%0*d", nb, i+1), stdout, ok2, time.Since(start)}
 		if !ok2 {
 			// Still run the other tests.
 			ok = false
