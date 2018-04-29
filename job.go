@@ -314,6 +314,16 @@ func (j *jobRequest) syncParallel(c chan<- setupWorkResult) {
 		}
 		return nil
 	})
+
+	// Remove $GOPATH/bin unconditionally. Otherwise a 'go install' may fail yet
+	// the execution afterwards 'succeeds' because a stale binary was left from a
+	// previous run.
+	if err2 := os.RemoveAll(filepath.Join(j.gopath, "bin")); err2 == nil {
+		c <- setupWorkResult{"Removed $GOPATH/bin\n", true}
+	} else {
+		c <- setupWorkResult{"Removed $GOPATH/bin:" + err.Error() + "\n", false}
+	}
+
 	wg.Wait()
 	if err != nil {
 		c <- setupWorkResult{"<directory walking failure>\n" + err.Error() + "\n", false}
