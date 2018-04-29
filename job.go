@@ -86,7 +86,7 @@ type gistFile struct {
 
 // jobRequest is the details to run a verification job.
 type jobRequest struct {
-	p          *project
+	p          project
 	useSSH     bool     // useSSH tells to use ssh instead of https
 	commitHash string   // commit hash, not a ref
 	pullID     int      // pullID is the PR ID if relevant
@@ -97,9 +97,9 @@ type jobRequest struct {
 
 // newJobRequest creates a new test request for project 'p' on commitHash
 // and/or pullID.
-func newJobRequest(p *project, useSSH bool, wd, commitHash string, pullID int) *jobRequest {
+func newJobRequest(p project, useSSH bool, wd, commitHash string, pullID int) *jobRequest {
 	// Organization names cannot contain an underscore so it 'should' be fine.
-	gopath := filepath.Join(wd, p.Org+"_"+p.Repo)
+	gopath := filepath.Join(wd, p.getOrg()+"_"+p.getRepo())
 	path := filepath.Join(gopath, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
 	// Setup the environment variables.
 	oldenv := os.Environ()
@@ -128,29 +128,32 @@ func newJobRequest(p *project, useSSH bool, wd, commitHash string, pullID int) *
 
 func (j *jobRequest) String() string {
 	if j.pullID != 0 {
-		return fmt.Sprintf("https://github.com/%s/pull/%d at https://github.com/%s/commit/%s", j.p.name(), j.pullID, j.p.name(), j.commitHash[:12])
+		return fmt.Sprintf("https://github.com/%s/pull/%d at https://github.com/%s/commit/%s", getID(j.p), j.pullID, getID(j.p), j.commitHash[:12])
 	}
-	return fmt.Sprintf("https://github.com/%s/commit/%s", j.p.name(), j.commitHash[:12])
+	return fmt.Sprintf("https://github.com/%s/commit/%s", getID(j.p), j.commitHash[:12])
 }
 
 func (j *jobRequest) cloneURL() string {
 	if j.useSSH {
-		return "git@github.com:" + j.p.name()
+		return "git@github.com:" + getID(j.p)
 	}
-	return "https://github.com/" + j.p.name()
+	return "https://github.com/" + getID(j.p)
 }
 
-// commitHashForPR tries to get the HEAD commit for the PR #.
-func (j *jobRequest) commitHashForPR() bool {
-	if j.pullID == 0 {
+// findCommitHash tries to get the HEAD commit for the PR # or master branch.
+func (j *jobRequest) findCommitHash() bool {
+	if err := j.assertDir(); err != nil {
 		return false
 	}
-	// TODO(maruel): It fails if the repository had never been checked out.
-	stdout, ok := j.run(j.p.path(), nil, []string{"git", "ls-remote", j.cloneURL()}, false)
+	stdout, ok := j.run("", nil, []string{"git", "ls-remote", j.cloneURL()}, false)
 	if !ok {
+		log.Printf("  git ls-remote failed:\n%s", stdout)
 		return false
 	}
-	p := fmt.Sprintf("refs/pull/%d/head", j.pullID)
+	p := "refs/heads/master"
+	if j.pullID != 0 {
+		p = fmt.Sprintf("refs/pull/%d/head", j.pullID)
+	}
 	for _, l := range strings.Split(stdout, "\n") {
 		if strings.HasSuffix(l, p) {
 			j.commitHash = strings.SplitN(l, "\t", 2)[0]
@@ -158,6 +161,7 @@ func (j *jobRequest) commitHashForPR() bool {
 			return true
 		}
 	}
+	log.Printf("  Didn't find remote")
 	return false
 }
 
@@ -242,13 +246,13 @@ func (j *jobRequest) fetchRepo(repoRel string) (string, bool) {
 // cloneOrFetch is meant to be used on the primary repository, making sure it
 // is checked out at the expected commit or Pull Request.
 func (j *jobRequest) cloneOrFetch(c chan<- setupWorkResult) {
-	p := filepath.Join(j.gopath, "src", j.p.path())
+	p := filepath.Join(j.gopath, "src", j.p.getPath())
 	if _, err := os.Stat(p); err != nil && !os.IsNotExist(err) {
 		c <- setupWorkResult{"<failure>\n" + err.Error() + "\n", false}
 		return
 	} else if err != nil {
 		// Directory doesn't exist, need to clone.
-		stdout, ok := j.run(filepath.Dir(j.p.path()), nil, []string{"git", "clone", "--quiet", j.cloneURL()}, false)
+		stdout, ok := j.run(filepath.Dir(j.p.getPath()), nil, []string{"git", "clone", "--quiet", j.cloneURL()}, false)
 		c <- setupWorkResult{stdout, ok}
 		if j.pullID == 0 || !ok {
 			// For PRs, the commit has to be fetched manually.
@@ -261,8 +265,19 @@ func (j *jobRequest) cloneOrFetch(c chan<- setupWorkResult) {
 	if j.pullID != 0 {
 		args = append(args, fmt.Sprintf("pull/%d/head", j.pullID))
 	}
-	stdout, ok := j.run(j.p.path(), nil, args, false)
+	stdout, ok := j.run(j.p.getPath(), nil, args, false)
 	c <- setupWorkResult{stdout, ok}
+}
+
+func (j *jobRequest) assertDir() error {
+	repoPath := filepath.Join(j.gopath, "src", j.p.getPath())
+	up := filepath.Dir(repoPath)
+	err := os.MkdirAll(up, 0700)
+	log.Printf("MkdirAll(%q) -> %v", up, err)
+	if err != nil && !os.IsExist(err) {
+		return err
+	}
+	return nil
 }
 
 // syncParallel checkouts out one repository if missing, and syncs all the
@@ -279,11 +294,8 @@ func (j *jobRequest) syncParallel(c chan<- setupWorkResult) {
 	// git clone / go get will have a race condition if the directory doesn't
 	// exist.
 	root := filepath.Join(j.gopath, "src")
-	repoPath := filepath.Join(root, j.p.path())
-	up := filepath.Dir(repoPath)
-	err := os.MkdirAll(up, 0700)
-	log.Printf("MkdirAll(%q) -> %v", up, err)
-	if err != nil && !os.IsExist(err) {
+	repoPath := filepath.Join(root, j.p.getPath())
+	if err := j.assertDir(); err != nil {
 		c <- setupWorkResult{"<failure>\n" + err.Error() + "\n", false}
 		return
 	}
@@ -295,7 +307,7 @@ func (j *jobRequest) syncParallel(c chan<- setupWorkResult) {
 	}()
 
 	// Sync all the repositories concurrently.
-	err = filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
+	err1 := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -321,12 +333,12 @@ func (j *jobRequest) syncParallel(c chan<- setupWorkResult) {
 	if err2 := os.RemoveAll(filepath.Join(j.gopath, "bin")); err2 == nil {
 		c <- setupWorkResult{"Removed $GOPATH/bin\n", true}
 	} else {
-		c <- setupWorkResult{"Removed $GOPATH/bin:" + err.Error() + "\n", false}
+		c <- setupWorkResult{"Removed $GOPATH/bin:" + err2.Error() + "\n", false}
 	}
 
 	wg.Wait()
-	if err != nil {
-		c <- setupWorkResult{"<directory walking failure>\n" + err.Error() + "\n", false}
+	if err1 != nil {
+		c <- setupWorkResult{"<directory walking failure>\n" + err1.Error() + "\n", false}
 	}
 }
 
@@ -376,7 +388,7 @@ func runChecks(j *jobRequest, results chan<- gistFile) bool {
 	setupGet := gistFile{name: "setup-2-get", success: true}
 	for _, c := range setupCmds {
 		stdout := ""
-		stdout, setupGet.success = j.run(j.p.path(), nil, c, false)
+		stdout, setupGet.success = j.run(j.p.getPath(), nil, c, false)
 		setupGet.content += stdout
 		if !setupGet.success {
 			break
@@ -389,10 +401,11 @@ func runChecks(j *jobRequest, results chan<- gistFile) bool {
 	}
 	ok := true
 	// Finally run the checks!
-	nb := len(strconv.Itoa(len(j.p.Checks)))
-	for i, c := range j.p.Checks {
+	checks := j.p.getChecks()
+	nb := len(strconv.Itoa(len(checks)))
+	for i, c := range checks {
 		start = time.Now()
-		stdout, ok2 := j.run(j.p.path(), c.Env, c.Cmd, true)
+		stdout, ok2 := j.run(j.p.getPath(), c.Env, c.Cmd, true)
 		results <- gistFile{fmt.Sprintf("cmd%0*d", nb, i+1), stdout, ok2, time.Since(start)}
 		if !ok2 {
 			// Still run the other tests.
@@ -400,34 +413,4 @@ func runChecks(j *jobRequest, results chan<- gistFile) bool {
 		}
 	}
 	return ok
-}
-
-// runLocal runs the checks run.
-func runLocal(p *project, w *worker, wd, commitHash string, update, useSSH bool) error {
-	j := newJobRequest(p, useSSH, wd, commitHash, 0)
-	if !update {
-		results := make(chan gistFile)
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range results {
-				if !i.success {
-					i.name += " (failed)"
-				}
-				fmt.Printf("--- %s\n%s", i.name, i.content)
-			}
-		}()
-		fmt.Printf("--- setup-0-metadata\n%s", j.metadata())
-		success := runChecks(j, results)
-		close(results)
-		wg.Wait()
-		_, err := fmt.Printf("\nSuccess: %t\n", success)
-		return err
-	}
-	// The reason for using the async version is that it creates the status.
-	w.enqueueCheck(j, nil)
-	w.wg.Wait()
-	// TODO(maruel): Return any error that occurred.
-	return nil
 }

@@ -23,11 +23,21 @@ import (
 	"strings"
 )
 
+// runLocal runs the checks run.
+func runLocal(w worker, p project, commitHash string, useSSH bool) error {
+	log.Printf("Running locally")
+	// The reason for using the async version is that it creates the status.
+	w.enqueueCheck(p, useSSH, commitHash, 0, nil)
+	w.wait()
+	// TODO(maruel): Return any error that occurred.
+	return nil
+}
+
 func mainImpl() error {
 	test := flag.String("test", "", "runs a simulation locally, specify the git repository name (not URL) to test, e.g. 'periph/gohci'")
+	alt := flag.String("alt", "", "alt path to use, e.g. 'periph.io/x/gohci'")
 	commit := flag.String("commit", "", "commit SHA1 to test and update; will only update status on github if not 'HEAD'")
 	useSSH := flag.Bool("usessh", false, "use SSH to fetch the repository instead of HTTPS; only necessary when testing")
-	update := flag.Bool("update", false, "when coupled with -test and -commit, update the remote repository")
 	flag.Parse()
 	if runtime.GOOS != "windows" {
 		log.SetFlags(0)
@@ -36,18 +46,15 @@ func mainImpl() error {
 		if len(*commit) != 0 {
 			return errors.New("-commit doesn't make sense without -test")
 		}
+		if len(*alt) != 0 {
+			return errors.New("-alt doesn't make sense without -test")
+		}
 		if *useSSH {
 			return errors.New("-usessh doesn't make sense without -test")
-		}
-		if *update {
-			return errors.New("-update can only be used with -test")
 		}
 	} else {
 		if strings.HasPrefix(*test, "github.com/") {
 			return errors.New("don't prefix -test value with 'github.com/', it is already assumed")
-		}
-		if len(*commit) == 0 {
-			*commit = "HEAD"
 		}
 	}
 	defer func() {
@@ -63,13 +70,13 @@ func mainImpl() error {
 	if err != nil {
 		return err
 	}
-	w := newWorker(c.Name, c.Oauth2AccessToken)
+	w := newWorkerQueue(c.Name, wd, c.Oauth2AccessToken)
 	if len(*test) != 0 {
 		parts := strings.SplitN(*test, "/", 2)
-		p := c.getProject(parts[0], parts[1])
-		return runLocal(p, w, wd, *commit, *update, *useSSH)
+		p := projectDef{Org: parts[0], Repo: parts[1], AltPath: *alt}
+		return runLocal(w, &p, *commit, *useSSH)
 	}
-	return runServer(c, w, wd, fileName)
+	return runServer(c, w, fileName)
 }
 
 func main() {

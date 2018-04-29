@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,39 +16,58 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// worker is the task queue server.
-type worker struct {
+// worker is the object that handles the queue of job requests.
+type worker interface {
+	// enqueueCheck immediately add the status that the test run is pending and
+	// add the run in the queue. Ensures that the service doesn't restart until
+	// the task is done.
+	enqueueCheck(p project, useSSH bool, commitHash string, pullID int, blame []string)
+	// wait waits until all enqueued worker job requests are done.
+	wait()
+}
+
+// workerQueue is the task queue server.
+type workerQueue struct {
 	name   string // Copy of config.Name
 	ctx    context.Context
 	client *github.Client // Used to set commit status and create gists.
+	wd     string
 
 	mu sync.Mutex     // Set when a check is running in runCheck()
 	wg sync.WaitGroup // Set for each pending task.
 }
 
-func newWorker(name, accessToken string) *worker {
+func newWorkerQueue(name, wd string, accessToken string) worker {
 	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken}))
-	return &worker{
+	return &workerQueue{
 		name:   name,
 		ctx:    context.Background(),
 		client: github.NewClient(tc),
+		wd:     wd,
 	}
 }
 
-// enqueueCheck immediately add the status that the test run is pending and
-// add the run in the queue. Ensures that the service doesn't restart until the
-// task is done.
-func (w *worker) enqueueCheck(j *jobRequest, blame []string) {
+// enqueueCheck implements worker.
+func (w *workerQueue) enqueueCheck(p project, useSSH bool, commitHash string, pullID int, blame []string) {
 	w.wg.Add(1)
 	defer w.wg.Done()
-	log.Printf("- Enqueuing test for %s at %s", j.p.name(), j.commitHash)
+
+	j := newJobRequest(p, useSSH, w.wd, commitHash, pullID)
+	// Immediately fetch the issue head commit inside the webhook, since
+	// it's a race condition.
+	if commitHash == "" && !j.findCommitHash() {
+		log.Printf("- failed to get HEAD for issue #%d", pullID)
+		return
+	}
+	log.Printf("- Enqueuing test for %s at %s", getID(j.p), j.commitHash)
+
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
 		State:       github.String("pending"),
-		Description: github.String(fmt.Sprintf("Tests pending (0/%d)", len(j.p.Checks)+2)),
+		Description: github.String(fmt.Sprintf("Tests pending (0/%d)", len(j.p.getChecks())+2)),
 		Context:     &w.name,
 	}
-	if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.Org, j.p.Repo, j.commitHash, status); err != nil {
+	if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.getOrg(), j.p.getRepo(), j.commitHash, status); err != nil {
 		// Don't bother running the tests.
 		log.Printf("- Failed to create status: %v", err)
 		return
@@ -60,6 +80,11 @@ func (w *worker) enqueueCheck(j *jobRequest, blame []string) {
 	}()
 }
 
+// wait implements worker.
+func (w *workerQueue) wait() {
+	w.wg.Wait()
+}
+
 // runCheck runs the check for the repository hosted on github at the specified
 // commit.
 //
@@ -69,11 +94,11 @@ func (w *worker) enqueueCheck(j *jobRequest, blame []string) {
 // of github handles. These strings are different from what appears in the git
 // commit log. Non-team members cannot be assigned an issue, in this case the
 // API will silently drop them.
-func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []string) {
+func (w *workerQueue) runCheck(j *jobRequest, status *github.RepoStatus, blame []string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	log.Printf("- Running test for %s at %s", j.p.name(), j.commitHash)
-	total := len(j.p.Checks) + 2
+	log.Printf("- Running test for %s at %s", getID(j.p), j.commitHash)
+	total := len(j.p.getChecks()) + 2
 	gistDesc := fmt.Sprintf("%s for %s", w.name, j)
 	suffix := fmt.Sprintf(" (0/%d)", total)
 	// https://developer.github.com/v3/gists/#create-a-gist
@@ -82,7 +107,7 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 		Description: github.String(gistDesc + suffix),
 		Public:      github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
-			"setup-0-metadata": {Content: github.String(j.metadata() + "\nCommands to be run:\n" + j.p.cmds())},
+			"setup-0-metadata": {Content: github.String(j.metadata() + "\nCommands to be run:\n" + cmds(j.p.getChecks()))},
 		},
 	}
 	gist, _, err := w.client.Gists.Create(w.ctx, gist)
@@ -96,7 +121,7 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 	statusDesc := "Running tests"
 	status.TargetURL = gist.HTMLURL
 	status.Description = github.String(statusDesc + suffix)
-	if _, _, err = w.client.Repositories.CreateStatus(w.ctx, j.p.Org, j.p.Repo, j.commitHash, status); err != nil {
+	if _, _, err = w.client.Repositories.CreateStatus(w.ctx, j.p.getOrg(), j.p.getRepo(), j.commitHash, status); err != nil {
 		log.Printf("- Failed to update status: %v", err)
 		return
 	}
@@ -119,18 +144,18 @@ func (w *worker) runCheck(j *jobRequest, status *github.RepoStatus, blame []stri
 			Body:      gist.HTMLURL,
 			Assignees: &blame,
 		}
-		if issue, _, err := w.client.Issues.Create(w.ctx, j.p.Org, j.p.Repo, &issue); err != nil {
+		if issue, _, err := w.client.Issues.Create(w.ctx, j.p.getOrg(), j.p.getRepo(), &issue); err != nil {
 			log.Printf("- failed to create issue: %v", err)
 		} else {
 			log.Printf("- created issue #%d", *issue.ID)
 		}
 	}
-	log.Printf("- testing done: https://github.com/%s/commit/%s", j.p.name(), j.commitHash[:12])
+	log.Printf("- testing done: https://github.com/%s/commit/%s", getID(j.p), j.commitHash[:12])
 }
 
 // runCheckInner is the inner loop of runCheck. It updates gist as the checks
 // are progressing.
-func (w *worker) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix string, total int, gist *github.Gist, status *github.RepoStatus) bool {
+func (w *workerQueue) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix string, total int, gist *github.Gist, status *github.RepoStatus) bool {
 	start := time.Now()
 	results := make(chan gistFile)
 	w.wg.Add(1)
@@ -150,7 +175,7 @@ func (w *worker) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix strin
 				log.Printf("- failed to update gist: %v", err)
 			}
 			gist.Files = map[github.GistFilename]github.GistFile{}
-			if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.Org, j.p.Repo, j.commitHash, status); err != nil {
+			if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.getOrg(), j.p.getRepo(), j.commitHash, status); err != nil {
 				log.Printf("- failed to update status: %v", err)
 			}
 			delay = nil
@@ -162,7 +187,7 @@ func (w *worker) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix strin
 						log.Printf("- failed to update gist: %v", err)
 					}
 					gist.Files = map[github.GistFilename]github.GistFile{}
-					if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.Org, j.p.Repo, j.commitHash, status); err != nil {
+					if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.getOrg(), j.p.getRepo(), j.commitHash, status); err != nil {
 						log.Printf("- failed to update status: %v", err)
 					}
 				}
@@ -200,4 +225,22 @@ func (w *worker) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix strin
 			i++
 		}
 	}
+}
+
+//
+
+// cmds returns the list of commands to attach to the metadata gist as a single
+// indented string.
+func cmds(checks []check) string {
+	cmds := ""
+	for i, c := range checks {
+		if i != 0 {
+			cmds += "\n"
+		}
+		if len(c.Env) != 0 {
+			cmds += "  " + strings.Join(c.Env, " ")
+		}
+		cmds += "  " + strings.Join(c.Cmd, " ")
+	}
+	return cmds
 }

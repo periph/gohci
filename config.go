@@ -16,14 +16,41 @@ import (
 	yaml "gopkg.in/yaml.v2"
 )
 
+// serverConfig is the configuration for the web server.
+type serverConfig interface {
+	getName() string
+	getPort() int
+	getWebHookSecret() []byte
+	getProject(org, repo string) project
+}
+
+// project is the configuration for this project.
+type project interface {
+	getOrg() string
+	getRepo() string
+	// getPath returns the path to checkout the repository into. It may be
+	// different than "github.com/<org>/<repo>".
+	getPath() string
+	isSuperUser(user string) bool
+	getChecks() []check
+}
+
+// getID returns the "org/repo" identifier for a project.
+func getID(p project) string {
+	return p.getOrg() + "/" + p.getRepo()
+}
+
 // check is a single command to run.
 type check struct {
 	Cmd []string // Command to run.
 	Env []string // Optional environment variables to use.
 }
 
-// project defines a github repository being tested.
-type project struct {
+// Worker configuration via gohci.yml.
+
+// projectDef defines a github repository being tested in the worker gohci.yml
+// configuration file.
+type projectDef struct {
 	Org        string   // Organisation name (e.g. a user)
 	Repo       string   // Project name
 	AltPath    string   // Alternative package path to use. Defaults to the actual path.
@@ -31,21 +58,16 @@ type project struct {
 	Checks     []check  // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
 
-// name returns the "org/repo" identifier.
-func (p *project) name() string {
-	return p.Org + "/" + p.Repo
-}
-
-// path returns the path to checkout the repository into.
-func (p *project) path() string {
+// getPath implements project.
+func (p *projectDef) getPath() string {
 	if len(p.AltPath) != 0 {
 		return strings.Replace(p.AltPath, "/", string(os.PathSeparator), -1)
 	}
-	return filepath.Join("github.com/" + strings.Replace(p.name(), "/", string(os.PathSeparator), -1))
+	return filepath.Join("github.com", p.Org, p.Repo)
 }
 
 // isSuperUser returns true if the user can trigger tasks.
-func (p *project) isSuperUser(u string) bool {
+func (p *projectDef) isSuperUser(u string) bool {
 	for _, s := range p.SuperUsers {
 		if s == u {
 			return true
@@ -54,45 +76,45 @@ func (p *project) isSuperUser(u string) bool {
 	return false
 }
 
-// cmds returns the list of commands to attach to the metadata gist as a single
-// indented string.
-func (p *project) cmds() string {
-	cmds := ""
-	for i, c := range p.Checks {
-		if i != 0 {
-			cmds += "\n"
-		}
-		if len(c.Env) != 0 {
-			cmds += "  " + strings.Join(c.Env, " ")
-		}
-		cmds += "  " + strings.Join(c.Cmd, " ")
-	}
-	return cmds
+func (p *projectDef) getOrg() string {
+	return p.Org
 }
 
-type config struct {
-	Port              int       // TCP port number for HTTP server.
-	WebHookSecret     string    // https://developer.github.com/webhooks/
-	Oauth2AccessToken string    // https://github.com/settings/tokens, check "repo:status" and "gist"
-	Name              string    // Display name to use in the status report on Github.
-	Projects          []project // All the projects this workre handles.
+func (p *projectDef) getRepo() string {
+	return p.Repo
+}
+
+func (p *projectDef) getChecks() []check {
+	if len(p.Checks) == 0 {
+		return []check{{Cmd: []string{"go", "test", "./..."}}}
+	}
+	return p.Checks
+}
+
+// workerConfig is a worker configuration.
+type workerConfig struct {
+	Port              int          // TCP port number for HTTP server.
+	WebHookSecret     string       // https://developer.github.com/webhooks/
+	Oauth2AccessToken string       // https://github.com/settings/tokens, check "repo:status" and "gist"
+	Name              string       // Display name to use in the status report on Github.
+	Projects          []projectDef // All the projects this workre handles.
 }
 
 // loadConfig loads the current config or returns the default one.
 //
 // It saves a reformatted version on disk if it was not in the canonical format.
-func loadConfig(fileName string) (*config, error) {
+func loadConfig(fileName string) (*workerConfig, error) {
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = "gohci"
 	}
 	// Create a dummy config file to make it easier to edit.
-	c := &config{
+	c := &workerConfig{
 		Port:              8080,
 		WebHookSecret:     "Create a secret and set it at github.com/user/repo/settings/hooks",
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
 		Name:              hostname,
-		Projects: []project{
+		Projects: []projectDef{
 			{
 				Org:     "the user",
 				Repo:    "the project",
@@ -127,7 +149,23 @@ func loadConfig(fileName string) (*config, error) {
 	return c, nil
 }
 
-func (c *config) getProject(org, repo string) *project {
+// getName implements serverConfig.
+func (c *workerConfig) getName() string {
+	return c.Name
+}
+
+// getPort implements serverConfig.
+func (c *workerConfig) getPort() int {
+	return c.Port
+}
+
+// getWebHookSecret implements serverConfig.
+func (c *workerConfig) getWebHookSecret() []byte {
+	return []byte(c.WebHookSecret)
+}
+
+// getProject implements serverConfig.
+func (c *workerConfig) getProject(org, repo string) project {
 	for i := range c.Projects {
 		if c.Projects[i].Org == org && c.Projects[i].Repo == repo {
 			return &c.Projects[i]
@@ -135,11 +173,19 @@ func (c *config) getProject(org, repo string) *project {
 	}
 	// Allow the unconfigured project and only run go test on it, but do not
 	// specify any super user.
-	return &project{
-		Org:  org,
-		Repo: repo,
-		Checks: []check{
-			{Cmd: []string{"go", "test", "./..."}},
-		},
-	}
+	return &projectDef{Org: org, Repo: repo}
+}
+
+// Project configuration.
+
+type workerProjectConfig struct {
+	WorkerName string  // Worker which this config belongs to.
+	Checks     []check // Commands to run to test the repository. They are run one after the other from the repository's root.
+}
+
+// projectConfig is a configuration file found in a project as ".gohci.yml" in
+// the root directory of the repository.
+type projectConfig struct {
+	AltPath string                // Alternative package path to use. Defaults to the actual path.
+	Workers []workerProjectConfig //
 }

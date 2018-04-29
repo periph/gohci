@@ -21,17 +21,16 @@ import (
 )
 
 // runServer runs the web server.
-func runServer(c *config, wkr *worker, wd, fileName string) error {
+func runServer(c serverConfig, wkr worker, fileName string) error {
 	thisFile, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	log.Printf("Running in: %s", wd)
 	log.Printf("Executable: %s", thisFile)
-	log.Printf("Name: %s", c.Name)
+	log.Printf("Name: %s", c.getName())
 	log.Printf("PATH: %s", os.Getenv("PATH"))
 
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", c.Port))
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", c.getPort()))
 	if err != nil {
 		return err
 	}
@@ -39,7 +38,7 @@ func runServer(c *config, wkr *worker, wd, fileName string) error {
 	ln.Close()
 	log.Printf("Listening on: %s", a)
 
-	s := &server{c: c, w: wkr, wd: wd, start: time.Now()}
+	s := &server{c: c, w: wkr, start: time.Now()}
 	http.Handle("/", s)
 	go http.ListenAndServe(a, nil)
 
@@ -52,7 +51,7 @@ func runServer(c *config, wkr *worker, wd, fileName string) error {
 		log.Printf("Failed to initialize watcher: %v", err)
 	}
 
-	lib.SetConsoleTitle(fmt.Sprintf("gohci - %s - %s", a, wd))
+	lib.SetConsoleTitle(fmt.Sprintf("gohci - %s", a))
 	if err == nil {
 		select {
 		case <-w.Events:
@@ -64,15 +63,14 @@ func runServer(c *config, wkr *worker, wd, fileName string) error {
 		select {}
 	}
 	// Ensures no task is running.
-	s.w.wg.Wait()
+	s.w.wait()
 	return err
 }
 
 // server is the HTTP server and manages the task queue server.
 type server struct {
-	c     *config
-	w     *worker
-	wd    string
+	c     serverConfig
+	w     worker
 	start time.Time
 }
 
@@ -104,7 +102,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("- invalid method %s", r.Method)
 		return
 	}
-	payload, err := github.ValidatePayload(r, []byte(s.c.WebHookSecret))
+	payload, err := github.ValidatePayload(r, s.c.getWebHookSecret())
 	if err != nil {
 		http.Error(w, "Invalid secret", http.StatusUnauthorized)
 		log.Printf("- invalid secret")
@@ -149,8 +147,7 @@ func (s *server) handleCommitComment(e *github.CommitCommentEvent) {
 		return
 	}
 	// TODO(maruel): The commit could be on a branch never fetched?
-	j := newJobRequest(p, *e.Repo.Private, s.wd, *e.Comment.CommitID, 0)
-	s.w.enqueueCheck(j, nil)
+	s.w.enqueueCheck(p, *e.Repo.Private, *e.Comment.CommitID, 0, nil)
 }
 
 // https://developer.github.com/v3/activity/events/types/#issuecommentevent
@@ -174,14 +171,7 @@ func (s *server) handleIssueComment(e *github.IssueCommentEvent) {
 		return
 	}
 	// The commit hash is not provided. :(
-	j := newJobRequest(p, *e.Repo.Private, s.wd, "", *e.Issue.Number)
-	// Immediately fetch the issue head commit inside the webhook, since
-	// it's a race condition.
-	if !j.commitHashForPR() {
-		log.Printf("- failed to get HEAD for issue #%d", *e.Issue.Number)
-		return
-	}
-	s.w.enqueueCheck(j, nil)
+	s.w.enqueueCheck(p, *e.Repo.Private, "", *e.Issue.Number, nil)
 }
 
 // https://developer.github.com/v3/activity/events/types/#pullrequestevent
@@ -198,8 +188,7 @@ func (s *server) handlePullRequest(e *github.PullRequestEvent) {
 		log.Printf("- ignoring PR from not super user %q", *e.PullRequest.Head.Repo.FullName)
 		return
 	}
-	j := newJobRequest(p, *e.Repo.Private, s.wd, *e.PullRequest.Head.SHA, *e.PullRequest.Number)
-	s.w.enqueueCheck(j, nil)
+	s.w.enqueueCheck(p, *e.Repo.Private, *e.PullRequest.Head.SHA, *e.PullRequest.Number, nil)
 }
 
 // https://developer.github.com/v3/activity/events/types/#pullrequestreviewcommentevent
@@ -214,8 +203,7 @@ func (s *server) handlePullRequestReviewComment(e *github.PullRequestReviewComme
 		log.Printf("- ignoring issue #%d comment from user %q", *e.PullRequest.Number, *e.Sender.Login)
 		return
 	}
-	j := newJobRequest(p, *e.Repo.Private, s.wd, *e.PullRequest.Head.SHA, *e.PullRequest.Number)
-	s.w.enqueueCheck(j, nil)
+	s.w.enqueueCheck(p, *e.Repo.Private, *e.PullRequest.Head.SHA, *e.PullRequest.Number, nil)
 }
 
 // https://developer.github.com/v3/activity/events/types/#pushevent
@@ -242,6 +230,5 @@ func (s *server) handlePush(e *github.PushEvent) {
 		}
 	}
 	p := s.c.getProject(*e.Repo.Owner.Name, *e.Repo.Name)
-	j := newJobRequest(p, *e.Repo.Private, s.wd, *e.HeadCommit.ID, 0)
-	s.w.enqueueCheck(j, blame)
+	s.w.enqueueCheck(p, *e.Repo.Private, *e.HeadCommit.ID, 0, blame)
 }
