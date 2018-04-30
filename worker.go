@@ -221,7 +221,6 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 			if len(r.content) == 0 {
 				r.content = "<missing>"
 			}
-			gist.Files[github.GistFilename(r.name)] = github.GistFile{Content: &r.content}
 
 			firstFailure := false
 			if !r.success {
@@ -254,6 +253,7 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 				suffix += " (failed)"
 			}
 			suffix += " in " + roundTime(time.Since(start)).String()
+			gist.Files[github.GistFilename(r.name)] = github.GistFile{Content: &r.content}
 			gist.Description = github.String(fmt.Sprintf("%s for %s%s", w.name, j, suffix))
 			status.Description = github.String(statusDesc + suffix)
 
