@@ -11,9 +11,14 @@
 
 set -eu
 
-go get -u -v periph.io/x/gohci
+if (which gohci >/dev/null); then
+  echo Found gohci
+else
+  echo Fetching gohci
+  go get periph.io/x/gohci
+fi
 
-mkdir /home/${USER}/gohci
+mkdir -p /home/${USER}/gohci
 
 
 sudo tee /etc/systemd/system/gohci.service << EOF
