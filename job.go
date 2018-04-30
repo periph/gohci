@@ -401,21 +401,26 @@ func (j *jobRequest) checkout() (string, bool) {
 // parseConfig is the third part of a job.
 //
 // It reads the ".gohci.yml" if there's one.
-func (j *jobRequest) parseConfig(name string) []check {
+func (j *jobRequest) parseConfig(name string) ([]check, string) {
 	checks := j.p.getChecks()
 	if len(checks) != 0 {
 		// Local checks always override the ones defined in the repository.
-		return checks
+		return checks, "Using worker's checks defined in its gohci.yml"
 	}
 	if p := loadProjectConfig(filepath.Join(j.gopath, "src", j.p.getPath(), ".gohci.yml")); p != nil {
 		for _, w := range p.Workers {
 			if w.Name == name {
-				return w.Checks
+				return w.Checks, "Using worker specific checks from the repo's .gohci.yml"
+			}
+		}
+		for _, w := range p.Workers {
+			if w.Name == "" {
+				return w.Checks, "Using generic checks from the repo's .gohci.yml"
 			}
 		}
 	}
 	// Returns the default.
-	return []check{{Cmd: []string{"go", "test", "./..."}}}
+	return []check{{Cmd: []string{"go", "test", "./..."}}}, "Using default check"
 }
 
 // runChecks is the fourth part of a job.

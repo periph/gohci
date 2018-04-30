@@ -159,7 +159,11 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 	defer w.wg.Done()
 	start := time.Now()
 	results := make(chan gistFile, 16)
-	cc := make(chan []check)
+	type up struct {
+		checks []check
+		note   string
+	}
+	cc := make(chan up)
 	go func() {
 		defer close(results)
 
@@ -181,8 +185,8 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 
 		// Phase 3: parse config.
 		start = time.Now()
-		chks := j.parseConfig(w.name)
-		cc <- chks
+		chks, note := j.parseConfig(w.name)
+		cc <- up{chks, note}
 
 		// Phase 4: checks.
 		j.runChecks(chks, results)
@@ -200,9 +204,9 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 			w.status(j, status)
 			delay = nil
 
-		case checks := <-cc:
-			total = len(checks)
-			results <- gistFile{"setup-3-checks", "Commands to be run:\n" + cmds(checks), true, 0}
+		case c := <-cc:
+			total = len(c.checks)
+			results <- gistFile{"setup-3-checks", c.note + "\nCommands to be run:\n" + cmds(c.checks), true, 0}
 
 		case r, ok := <-results:
 			if !ok {
