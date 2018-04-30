@@ -240,14 +240,15 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 			if total != 0 {
 				if checkNum != total {
 					suffix = fmt.Sprintf(" (%d/%d)", checkNum, total)
+					checkNum++
 				} else {
+					// Last check.
 					statusDesc = "Ran tests"
 					if !failed {
 						suffix += " (success!)"
 						status.State = github.String("success")
 					}
 				}
-				checkNum++
 			}
 			if failed {
 				suffix += " (failed)"
