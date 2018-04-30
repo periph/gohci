@@ -351,30 +351,31 @@ type setupWorkResult struct {
 	ok      bool
 }
 
-// runChecks syncs then runs the checks and returns task's results.
+// sync is the first part of a job.
 //
 // It aggressively concurrently fetches all repositories in `gopath` to
 // accelerate the processing.
-func runChecks(j *jobRequest, results chan<- gistFile) bool {
-	start := time.Now()
+func (j *jobRequest) sync() (string, bool) {
 	c := make(chan setupWorkResult)
 	go func() {
 		defer close(c)
 		j.syncParallel(c)
 	}()
-	setupSync := setupWorkResult{"", true}
+	out := ""
+	ok := true
 	for i := range c {
-		setupSync.content += i.content
-		if !i.ok {
-			setupSync.ok = false
-		}
+		out += i.content
+		ok = ok && i.ok
 	}
-	results <- gistFile{"setup-1-sync", setupSync.content, setupSync.ok, time.Since(start)}
-	if !setupSync.ok {
-		return false
-	}
+	return out, ok
+}
 
-	start = time.Now()
+// checkout is the second part of a job.
+//
+// It checkouts out the primary repository at the right commit and runs "go
+// get".
+func (j *jobRequest) checkout() (string, bool) {
+	// Second part: checkout the right commit, run go get.
 	setupCmds := [][]string{
 		// "go get" will try to pull and will complain if the checkout is not on a
 		// branch.
@@ -385,32 +386,48 @@ func runChecks(j *jobRequest, results chan<- gistFile) bool {
 		// Pull add necessary dependencies.
 		{"go", "get", "-v", "-d", "-t", "./..."},
 	}
-	setupGet := gistFile{name: "setup-2-get", success: true}
+	out := ""
+	ok := true
 	for _, c := range setupCmds {
-		stdout := ""
-		stdout, setupGet.success = j.run(j.p.getPath(), nil, c, false)
-		setupGet.content += stdout
-		if !setupGet.success {
+		stdout, ok2 := j.run(j.p.getPath(), nil, c, false)
+		out += stdout
+		if ok = ok && ok2; !ok {
 			break
 		}
 	}
-	setupGet.d = time.Since(start)
-	results <- setupGet
-	if !setupGet.success {
-		return false
-	}
-	ok := true
-	// Finally run the checks!
+	return out, ok
+}
+
+// parseConfig is the third part of a job.
+//
+// It reads the ".gohci.yml" if there's one.
+func (j *jobRequest) parseConfig(name string) []check {
 	checks := j.p.getChecks()
+	if len(checks) != 0 {
+		// Local checks always override the ones defined in the repository.
+		return checks
+	}
+	if p := loadProjectConfig(filepath.Join(j.gopath, "src", j.p.getPath(), ".gohci.yml")); p != nil {
+		for _, w := range p.Workers {
+			if w.Name == name {
+				return w.Checks
+			}
+		}
+	}
+	// Returns the default.
+	return []check{{Cmd: []string{"go", "test", "./..."}}}
+}
+
+// runChecks is the fourth part of a job.
+func (j *jobRequest) runChecks(checks []check, results chan<- gistFile) bool {
+	ok := true
 	nb := len(strconv.Itoa(len(checks)))
 	for i, c := range checks {
-		start = time.Now()
+		start := time.Now()
 		stdout, ok2 := j.run(j.p.getPath(), c.Env, c.Cmd, true)
 		results <- gistFile{fmt.Sprintf("cmd%0*d", nb, i+1), stdout, ok2, time.Since(start)}
-		if !ok2 {
-			// Still run the other tests.
-			ok = false
-		}
+		// Still run the other tests.
+		ok = ok && ok2
 	}
 	return ok
 }

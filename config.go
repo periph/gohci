@@ -85,9 +85,6 @@ func (p *projectDef) getRepo() string {
 }
 
 func (p *projectDef) getChecks() []check {
-	if len(p.Checks) == 0 {
-		return []check{{Cmd: []string{"go", "test", "./..."}}}
-	}
 	return p.Checks
 }
 
@@ -176,16 +173,26 @@ func (c *workerConfig) getProject(org, repo string) project {
 	return &projectDef{Org: org, Repo: repo}
 }
 
-// Project configuration.
+// Project configuration via ".gohci.yml".
 
 type workerProjectConfig struct {
-	WorkerName string  // Worker which this config belongs to.
-	Checks     []check // Commands to run to test the repository. They are run one after the other from the repository's root.
+	Name   string  // Worker which this config belongs to.
+	Checks []check // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
 
 // projectConfig is a configuration file found in a project as ".gohci.yml" in
 // the root directory of the repository.
 type projectConfig struct {
-	AltPath string                // Alternative package path to use. Defaults to the actual path.
+	Version int                   // Current 1
 	Workers []workerProjectConfig //
+}
+
+func loadProjectConfig(fileName string) *projectConfig {
+	if b, err := ioutil.ReadFile(fileName); err == nil {
+		p := &projectConfig{}
+		if err = yaml.Unmarshal(b, p); err == nil && p.Version == 1 {
+			return p
+		}
+	}
+	return nil
 }

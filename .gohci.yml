@@ -1,0 +1,19 @@
+# See https://github.com/periph/gohci
+version: 1
+workers:
+- name: win10
+  checks:
+  - cmd:
+    - go
+    - test
+    - -race
+    - ./...
+  - cmd:
+    - go
+    - vet
+    - ./...
+- checks:
+  - cmd:
+    - go
+    - test
+    - ./...

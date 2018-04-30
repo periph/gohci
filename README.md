@@ -16,7 +16,7 @@
   - [macOS](#macos)
   - [Configuration](#configuration)
   - [Private repository](#private-repository)
-- [Private repository](#private-repository)
+- [Project config](#project-config)
 - [Testing](#testing)
 - [Security](#security)
 - [FAQ](#faq)
@@ -293,6 +293,43 @@ is private. For it to work you must:
   `$HOME/.ssh/id_rsa.pub`, `%USERPROFILE%\.ssh\id_rsa.pub` on Windows.
 - Do not check `Allow write access`!
 - Click `Add key`.
+
+
+## Project config
+
+While you can add the checks on the worker itself, you can also add them to the
+project in a file
+[.gohci.yml](https://github.com/periph/gohci/blob/master/.gohci.yml):
+
+When the worker name is not provided, this becomes the default checks. Checks on
+the worker's `gohci.yml`, if defined, always override the project's
+`.gohci.yml`.
+
+If the project uses an alternate import path, like `periph.io/x/gohci` for
+`github.com/periph/gohci`, this has to be defined on the worker's `gohci.yml`.
+
+```
+# See https://github.com/periph/gohci
+version: 1
+workers:
+- name: win10
+  checks:
+  - cmd:
+    - go
+    - test
+    - -race
+    - ./...
+  - cmd:
+    - go
+    - vet
+    - ./...
+- checks:
+  - cmd:
+    - go
+    - test
+    - -race
+    - ./...
+```
 
 
 ## Testing

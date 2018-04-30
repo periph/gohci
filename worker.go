@@ -33,7 +33,7 @@ type workerQueue struct {
 	client *github.Client // Used to set commit status and create gists.
 	wd     string
 
-	mu sync.Mutex     // Set when a check is running in runCheck()
+	mu sync.Mutex     // Set when a check is running in runJobRequest()
 	wg sync.WaitGroup // Set for each pending task.
 }
 
@@ -64,19 +64,20 @@ func (w *workerQueue) enqueueCheck(p project, useSSH bool, commitHash string, pu
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
 		State:       github.String("pending"),
-		Description: github.String(fmt.Sprintf("Tests pending (0/%d)", len(j.p.getChecks())+2)),
+		Description: github.String("Tests pending"),
 		Context:     &w.name,
 	}
-	if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.getOrg(), j.p.getRepo(), j.commitHash, status); err != nil {
+	if !w.status(j, status) {
 		// Don't bother running the tests.
-		log.Printf("- Failed to create status: %v", err)
 		return
 	}
 	// Enqueue and run.
+	// TODO(maruel): It should be a buffered channel so it stays FIFO and can
+	// deny when there's too many tasks enqueued.
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
-		w.runCheck(j, status, blame)
+		w.runJobRequest(j, status, blame)
 	}()
 }
 
@@ -85,8 +86,8 @@ func (w *workerQueue) wait() {
 	w.wg.Wait()
 }
 
-// runCheck runs the check for the repository hosted on github at the specified
-// commit.
+// runJobRequest runs the check for the repository hosted on github at the
+// specified commit.
 //
 // It will use the ssh protocol if "useSSH" is set, https otherwise.
 // "status" is the github status to keep updating as progress is made.
@@ -94,20 +95,17 @@ func (w *workerQueue) wait() {
 // of github handles. These strings are different from what appears in the git
 // commit log. Non-team members cannot be assigned an issue, in this case the
 // API will silently drop them.
-func (w *workerQueue) runCheck(j *jobRequest, status *github.RepoStatus, blame []string) {
+func (w *workerQueue) runJobRequest(j *jobRequest, status *github.RepoStatus, blame []string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	log.Printf("- Running test for %s at %s", getID(j.p), j.commitHash)
-	total := len(j.p.getChecks()) + 2
-	gistDesc := fmt.Sprintf("%s for %s", w.name, j)
-	suffix := fmt.Sprintf(" (0/%d)", total)
 	// https://developer.github.com/v3/gists/#create-a-gist
 	// It is accessible via the URL without authentication even if "private".
 	gist := &github.Gist{
-		Description: github.String(gistDesc + suffix),
+		Description: github.String(fmt.Sprintf("%s for %s", w.name, j)),
 		Public:      github.Bool(false),
 		Files: map[github.GistFilename]github.GistFile{
-			"setup-0-metadata": {Content: github.String(j.metadata() + "\nCommands to be run:\n" + cmds(j.p.getChecks()))},
+			"setup-0-metadata": {Content: github.String(j.metadata())},
 		},
 	}
 	gist, _, err := w.client.Gists.Create(w.ctx, gist)
@@ -118,15 +116,13 @@ func (w *workerQueue) runCheck(j *jobRequest, status *github.RepoStatus, blame [
 	}
 	log.Printf("- Gist at %s", *gist.HTMLURL)
 
-	statusDesc := "Running tests"
 	status.TargetURL = gist.HTMLURL
-	status.Description = github.String(statusDesc + suffix)
-	if _, _, err = w.client.Repositories.CreateStatus(w.ctx, j.p.getOrg(), j.p.getRepo(), j.commitHash, status); err != nil {
-		log.Printf("- Failed to update status: %v", err)
+	status.Description = github.String("Running tests")
+	if !w.status(j, status) {
 		return
 	}
 
-	failed := w.runCheckInner(j, statusDesc, gistDesc, suffix, total, gist, status)
+	failed := w.runJobRequestInner(j, gist, status)
 
 	// This requires OAuth scope 'public_repo' or 'repo'. The problem is that
 	// this gives full write access, not just issue creation and this is
@@ -153,78 +149,148 @@ func (w *workerQueue) runCheck(j *jobRequest, status *github.RepoStatus, blame [
 	log.Printf("- testing done: https://github.com/%s/commit/%s", getID(j.p), j.commitHash[:12])
 }
 
-// runCheckInner is the inner loop of runCheck. It updates gist as the checks
-// are progressing.
-func (w *workerQueue) runCheckInner(j *jobRequest, statusDesc, gistDesc, suffix string, total int, gist *github.Gist, status *github.RepoStatus) bool {
-	start := time.Now()
-	results := make(chan gistFile)
+// runJobRequestInner is the inner loop of runJobRequest. It updates gist as the
+// checks are progressing.
+//
+// Returns true if it failed.
+func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, status *github.RepoStatus) bool {
+	// The function exits once results is closed by the goroutine below.
 	w.wg.Add(1)
+	defer w.wg.Done()
+	start := time.Now()
+	results := make(chan gistFile, 16)
+	cc := make(chan []check)
 	go func() {
-		defer w.wg.Done()
-		runChecks(j, results)
-		close(results)
+		defer close(results)
+
+		// Phase 1: parallel sync.
+		start := time.Now()
+		content, ok := j.sync()
+		results <- gistFile{"setup-1-sync", content, ok, time.Since(start)}
+		if !ok {
+			return
+		}
+
+		// Phase 2: checkout.
+		start = time.Now()
+		content, ok = j.checkout()
+		results <- gistFile{"setup-2-get", content, ok, time.Since(start)}
+		if !ok {
+			return
+		}
+
+		// Phase 3: parse config.
+		start = time.Now()
+		chks := j.parseConfig(w.name)
+		cc <- chks
+
+		// Phase 4: checks.
+		j.runChecks(chks, results)
 	}()
 
-	i := 1
+	// The check #0 is setup-3-checks.
+	checkNum := 0
 	failed := false
+	total := 0
 	var delay <-chan time.Time
 	for {
 		select {
 		case <-delay:
-			if _, _, err := w.client.Gists.Edit(w.ctx, *gist.ID, gist); err != nil {
-				log.Printf("- failed to update gist: %v", err)
-			}
-			gist.Files = map[github.GistFilename]github.GistFile{}
-			if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.getOrg(), j.p.getRepo(), j.commitHash, status); err != nil {
-				log.Printf("- failed to update status: %v", err)
-			}
+			w.gist(gist)
+			w.status(j, status)
 			delay = nil
+
+		case checks := <-cc:
+			total = len(checks)
+			results <- gistFile{"setup-3-checks", "Commands to be run:\n" + cmds(checks), true, 0}
 
 		case r, ok := <-results:
 			if !ok {
+				// The channel closed. Do one last update if necessary then quit.
 				if delay != nil {
-					if _, _, err := w.client.Gists.Edit(w.ctx, *gist.ID, gist); err != nil {
-						log.Printf("- failed to update gist: %v", err)
-					}
-					gist.Files = map[github.GistFilename]github.GistFile{}
-					if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.getOrg(), j.p.getRepo(), j.commitHash, status); err != nil {
-						log.Printf("- failed to update status: %v", err)
-					}
+					w.gist(gist)
+					w.status(j, status)
 				}
 				return failed
 			}
-
 			// https://developer.github.com/v3/gists/#edit-a-gist
 			if len(r.content) == 0 {
 				r.content = "<missing>"
 			}
+			gist.Files[github.GistFilename(r.name)] = github.GistFile{Content: &r.content}
+
+			firstFailure := false
 			if !r.success {
 				r.name += " (failed)"
-				failed = true
 				status.State = github.String("failure")
+				if !failed {
+					firstFailure = true
+				}
+				failed = true
 			}
 			r.name += " in " + roundTime(r.d).String()
-			suffix = ""
-			if i != total {
-				suffix = fmt.Sprintf(" (%d/%d)", i, total)
-			} else {
-				statusDesc = "Ran tests"
-				if !failed {
-					suffix += " (success!)"
-					status.State = github.String("success")
+
+			// Update descriptions.
+			suffix := ""
+			statusDesc := "Running tests"
+			if total != 0 {
+				if checkNum != total {
+					suffix = fmt.Sprintf(" (%d/%d)", checkNum, total)
+				} else {
+					statusDesc = "Ran tests"
+					if !failed {
+						suffix += " (success!)"
+						status.State = github.String("success")
+					}
 				}
+				checkNum++
 			}
 			if failed {
 				suffix += " (failed)"
 			}
 			suffix += " in " + roundTime(time.Since(start)).String()
-			gist.Files[github.GistFilename(r.name)] = github.GistFile{Content: &r.content}
-			gist.Description = github.String(gistDesc + suffix)
+			gist.Description = github.String(fmt.Sprintf("%s for %s%s", w.name, j, suffix))
 			status.Description = github.String(statusDesc + suffix)
-			delay = time.After(500 * time.Millisecond)
-			i++
+
+			// On first failure, do not wait.
+			if firstFailure {
+				w.gist(gist)
+				w.status(j, status)
+				delay = nil
+			} else if delay == nil {
+				// Otherwise, buffer for one second to reduce the number of RPCs. No
+				// need to flush for the last item, since the channel will be
+				// immediately closed right after.
+				delay = time.After(time.Second)
+			}
 		}
 	}
+}
+
+// status calls into w.client.Repositories.CreateStatus().
+func (w *workerQueue) status(j *jobRequest, status *github.RepoStatus) bool {
+	if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.getOrg(), j.p.getRepo(), j.commitHash, status); err != nil {
+		if status.ID != nil {
+			log.Printf("- failed to update status: %v", err)
+		} else {
+			log.Printf("- Failed to create status: %v", err)
+		}
+		return false
+	}
+	return true
+}
+
+// gist calls into w.client.Gists.Edit().
+//
+// It clears the file mapping to reduce I/O, since files are automatically
+// carried over.
+func (w *workerQueue) gist(gist *github.Gist) bool {
+	if _, _, err := w.client.Gists.Edit(w.ctx, *gist.ID, gist); err != nil {
+		log.Printf("- failed to update gist: %v", err)
+		return false
+	}
+	gist.Files = map[github.GistFilename]github.GistFile{}
+	return true
 }
 
 //
