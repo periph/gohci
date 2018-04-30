@@ -17,6 +17,8 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+
+	"github.com/pbnjay/memory"
 )
 
 // gohciBranch is a git branch name that doesn't have an high likelihood of
@@ -42,19 +44,32 @@ func normalizeUTF8(b []byte) []byte {
 	return out
 }
 
-// roundTime returns time rounded at a value that makes sense to display to the
-// user.
-func roundTime(t time.Duration) time.Duration {
-	if t < time.Millisecond {
-		// Precise at 1ns.
-		return t
+// roundDuration returns rounded time with approximatively 4~5 digits.
+func roundDuration(t time.Duration) time.Duration {
+	// Cheezy but good enough for now.
+	for r := time.Second; r > time.Microsecond; r /= 10 {
+		if t >= r {
+			d := r / 1000
+			return (t + d/2) / d * d
+		}
 	}
-	if t < time.Second {
-		// Precise at 1µs.
-		return (t + time.Microsecond/2) / time.Microsecond * time.Microsecond
+	return t
+}
+
+// roundSize rounds a size to something reasonable.
+func roundSize(t uint64) string {
+	orders := []string{"bytes", "Kib", "Mib", "Gib", "Tib", "Pib", "Eib"}
+	i := 0
+	for ; i < len(orders)-1; i++ {
+		if t/1024*1024 != t || t == 0 {
+			break
+		}
+		t /= 1024
 	}
-	// Round at 1ms
-	return (t + time.Millisecond/2) / time.Millisecond * time.Millisecond
+	if t > 1024 {
+		return fmt.Sprintf("%.1f%s", float64(t)/1024., orders[i+1])
+	}
+	return fmt.Sprintf("%d%s", t, orders[i])
 }
 
 // Wrap the exec.Command() call with PATH value override.
@@ -168,8 +183,8 @@ func (j *jobRequest) findCommitHash() bool {
 // metadata generates the pseudo-file to present information about the worker.
 func (j *jobRequest) metadata() string {
 	out := fmt.Sprintf(
-		"Commit:  %s\nCPUs:    %d\nVersion: %s\nGOROOT:  %s\nGOPATH:  %s\nPATH:    %s\n",
-		j.commitHash, runtime.NumCPU(), runtime.Version(), runtime.GOROOT(), j.gopath, j.path)
+		"Commit:  %s\nCPUs:    %d\nRAM:     %s\nVersion: %s\nGOROOT:  %s\nGOPATH:  %s\nPATH:    %s\n",
+		j.commitHash, runtime.NumCPU(), roundSize(memory.TotalMemory()), runtime.Version(), runtime.GOROOT(), j.gopath, j.path)
 	if runtime.GOOS != "windows" {
 		if s, err := exec.Command("uname", "-a").CombinedOutput(); err == nil {
 			out += "uname:   " + strings.TrimSpace(string(s)) + "\n"
@@ -220,7 +235,7 @@ func (j *jobRequest) run(relwd string, env []string, cmd []string, pathOverride 
 		}
 	}
 	return fmt.Sprintf("%s $ %s  (exit:%d in %s)\n%s",
-		filepath.Join("$GOPATH/src", relwd), cmds, exit, roundTime(duration), normalizeUTF8(out)), err == nil
+		filepath.Join("$GOPATH/src", relwd), cmds, exit, roundDuration(duration), normalizeUTF8(out)), err == nil
 }
 
 // fetchRepo tries to fetch a repository if possible and checks out

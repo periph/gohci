@@ -20,6 +20,13 @@
 #  name = "github.com/x/y"
 #  version = "2.4.0"
 
+ignored = [
+  "google.golang.org/appengine/urlfetch"
+]
+
+[prune]
+  go-tests = true
+  unused-packages = true
 
 [[constraint]]
   branch = "master"
@@ -31,6 +38,7 @@
 
 [[constraint]]
   name = "gopkg.in/fsnotify.v1"
+  source = "https://github.com/fsnotify/fsnotify.git"
   version = "1.4.2"
 
 [[constraint]]

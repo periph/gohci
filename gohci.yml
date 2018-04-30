@@ -1,0 +1,17 @@
+port: 8080
+webhooksecret: Create a secret and set it at github.com/user/repo/settings/hooks
+oauth2accesstoken: 
+name: ogre
+projects:
+- org: the user
+  repo: the project
+  altpath: ""
+  superusers:
+  - admin user1
+  - admin user2
+  checks:
+  - cmd:
+    - go
+    - test
+    - ./...
+    env: []

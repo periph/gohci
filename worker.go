@@ -231,7 +231,7 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 				}
 				failed = true
 			}
-			r.name += " in " + roundTime(r.d).String()
+			r.name += " in " + roundDuration(r.d).String()
 
 			// Update descriptions.
 			suffix := ""
@@ -252,7 +252,7 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 			if failed {
 				suffix += " (failed)"
 			}
-			suffix += " in " + roundTime(time.Since(start)).String()
+			suffix += " in " + roundDuration(time.Since(start)).String()
 			gist.Files[github.GistFilename(r.name)] = github.GistFile{Content: &r.content}
 			gist.Description = github.String(fmt.Sprintf("%s for %s%s", w.name, j, suffix))
 			status.Description = github.String(statusDesc + suffix)

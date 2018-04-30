@@ -2,16 +2,10 @@
 
 
 [[projects]]
-  name = "github.com/golang/protobuf"
-  packages = ["proto"]
-  revision = "925541529c1fa6821df4e44ce2723319eb2be768"
-  version = "v1.0.0"
-
-[[projects]]
   branch = "master"
   name = "github.com/google/go-github"
   packages = ["github"]
-  revision = "e7bb4b8ce29fb7beaf0765acda602bc516a56dd5"
+  revision = "29336dbceeab3a9b7e075b90d8b6d991d1bb5da2"
 
 [[projects]]
   branch = "master"
@@ -21,12 +15,18 @@
 
 [[projects]]
   branch = "master"
+  name = "github.com/pbnjay/memory"
+  packages = ["."]
+  revision = "b5111eaaafea7fbab4755541ae9edf36e9758d28"
+
+[[projects]]
+  branch = "master"
   name = "golang.org/x/net"
   packages = [
     "context",
     "context/ctxhttp"
   ]
-  revision = "ae89d30ce0c63142b652837da33d782e2b0a9b25"
+  revision = "5f9ae10d9af5b1c89ae6904293b14b064d4ada23"
 
 [[projects]]
   branch = "master"
@@ -35,29 +35,30 @@
     ".",
     "internal"
   ]
-  revision = "2f32c3ac0fa4fb807a0fcefb0b6f2468a0d99bd0"
+  revision = "6881fee410a5daf86371371f9ad451b95e168b71"
 
 [[projects]]
   branch = "master"
   name = "golang.org/x/sys"
   packages = ["unix"]
-  revision = "7dca6fe1f43775aa6d1334576870ff63f978f539"
+  revision = "f67ecc163a74fbeea4cb1db0a101dcd07201464a"
 
 [[projects]]
   name = "gopkg.in/fsnotify.v1"
   packages = ["."]
   revision = "c2828203cd70a50dcccfb2761f8b1f8ceef9a8e9"
+  source = "https://github.com/fsnotify/fsnotify.git"
   version = "v1.4.7"
 
 [[projects]]
   name = "gopkg.in/yaml.v2"
   packages = ["."]
-  revision = "7f97868eec74b32b0982dd158a51a446d1da7eb5"
-  version = "v2.1.1"
+  revision = "5420a8b6744d3b0345ab293f6fcba19c978f1183"
+  version = "v2.2.1"
 
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "0576799c5093ba036b67cb0c7a133758caa0a350b611a3295b2f391c1e09b669"
+  inputs-digest = "86baeb41724f53deac61092e6fd2a23835ebe4bd3f350a33aba3107bd7db072f"
   solver-name = "gps-cdcl"
   solver-version = 1
