@@ -45,23 +45,25 @@ View of the status on commits:
 It hardly can get any simpler:
 
 - Only support one specific use case: *Golang project hosted on Github*.
-- There is no "server", only workers. Each worker must be internet accessible
-  and HTTPS must be proxied down to HTTP.
+- There is no "server", only workers that you run yourself. Each worker must be
+  internet accessible and HTTPS must be proxied down to HTTP.
   - [Caddy](https://caddyserver.com/) works great along its native
     [letsencrypt.org](https://letsencrypt.org) support.
 
 
 ## Features
 
+- 100% free and open source.
+  - Secure, you are in control. There's no third party service beside GitHub.
+  - Enables free testing on macOS, Windows or single CPU ARM micro computer.
+  - Low maintenance, run as systemd/launchd service.
 - Each worker can test multiple repositories, each with custom checks.
 - Each check's stdout is attached to the gist as they complete.
 - The commit's status is updated "_live_" on Github. This is pretty cool to see
-  in action on a github PR.
-- Trivial to run as a low maintenance systemd/launchd service.
-- Designed to work as great on a single core ARM CPU with minimal memory
-  requirements than on Windows and macOS.
+  in action on a GitHub PR.
 - `gohci` exits whenever the executable or `gohci.yml` is updated; making it
   easy to use an auto-updating mechanism.
 
-Convinced? See [CONFIG.md](CONFIG.md) to get started and [FAQ.md](FAQ.md) for
-additional information.
+Not convinced? Read the [FAQ.md](FAQ.md) for additional information.
+
+Convinced? See [CONFIG.md](CONFIG.md) to get started!

@@ -21,7 +21,7 @@ type worker interface {
 	// enqueueCheck immediately add the status that the test run is pending and
 	// add the run in the queue. Ensures that the service doesn't restart until
 	// the task is done.
-	enqueueCheck(p project, useSSH bool, commitHash string, pullID int, blame []string)
+	enqueueCheck(org, repo, altpath, commitHash string, useSSH bool, pullID int, blame []string)
 	// wait waits until all enqueued worker job requests are done.
 	wait()
 }
@@ -48,18 +48,18 @@ func newWorkerQueue(name, wd string, accessToken string) worker {
 }
 
 // enqueueCheck implements worker.
-func (w *workerQueue) enqueueCheck(p project, useSSH bool, commitHash string, pullID int, blame []string) {
+func (w *workerQueue) enqueueCheck(org, repo, altpath, commitHash string, useSSH bool, pullID int, blame []string) {
 	w.wg.Add(1)
 	defer w.wg.Done()
 
-	j := newJobRequest(p, useSSH, w.wd, commitHash, pullID)
+	j := newJobRequest(org, repo, altpath, commitHash, useSSH, pullID, w.wd)
 	// Immediately fetch the issue head commit inside the webhook, since
 	// it's a race condition.
 	if commitHash == "" && !j.findCommitHash() {
 		log.Printf("- failed to get HEAD for issue #%d", pullID)
 		return
 	}
-	log.Printf("- Enqueuing test for %s at %s", getID(j.p), j.commitHash)
+	log.Printf("- Enqueuing test for %s at %s", j.getID(), j.commitHash)
 
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
@@ -98,7 +98,7 @@ func (w *workerQueue) wait() {
 func (w *workerQueue) runJobRequest(j *jobRequest, status *github.RepoStatus, blame []string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	log.Printf("- Running test for %s at %s", getID(j.p), j.commitHash)
+	log.Printf("- Running test for %s at %s", j.getID(), j.commitHash)
 	// https://developer.github.com/v3/gists/#create-a-gist
 	// It is accessible via the URL without authentication even if "private".
 	gist := &github.Gist{
@@ -140,13 +140,13 @@ func (w *workerQueue) runJobRequest(j *jobRequest, status *github.RepoStatus, bl
 			Body:      gist.HTMLURL,
 			Assignees: &blame,
 		}
-		if issue, _, err := w.client.Issues.Create(w.ctx, j.p.getOrg(), j.p.getRepo(), &issue); err != nil {
+		if issue, _, err := w.client.Issues.Create(w.ctx, j.org, j.repo, &issue); err != nil {
 			log.Printf("- failed to create issue: %v", err)
 		} else {
 			log.Printf("- created issue #%d", *issue.ID)
 		}
 	}
-	log.Printf("- testing done: https://github.com/%s/commit/%s", getID(j.p), j.commitHash[:12])
+	log.Printf("- testing done: https://github.com/%s/commit/%s", j.getID(), j.commitHash[:12])
 }
 
 // runJobRequestInner is the inner loop of runJobRequest. It updates gist as the
@@ -274,7 +274,7 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 
 // status calls into w.client.Repositories.CreateStatus().
 func (w *workerQueue) status(j *jobRequest, status *github.RepoStatus) bool {
-	if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.p.getOrg(), j.p.getRepo(), j.commitHash, status); err != nil {
+	if _, _, err := w.client.Repositories.CreateStatus(w.ctx, j.org, j.repo, j.commitHash, status); err != nil {
 		if status.ID != nil {
 			log.Printf("- failed to update status: %v", err)
 		} else {

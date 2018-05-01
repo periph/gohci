@@ -1,15 +1,26 @@
 # FAQ
 
 
+## What are the rules about which PRs are tested?
+
+By default, only commits in branches on the repository are tested but not PRs.
+
+You have to specify [`superUsers` on the
+webhook](https://github.com/periph/gohci/blob/query_arg/CONFIG.md#webhook) to
+grant 'super user' access. This allows:
+- All PRs created by these users to be tested automatically.
+- These users can comment `gohci` on any commit or PR to trigger a test run!
+
+
 ## What's the security story?
 
-This is a remote execution engine so assume the host that is running `gohci`
-will be 0wned. First part is to use a strong randomly generated webhook secret.
+This is a remote execution engine. It is designed to run code on it. At least,
+you get to decide what code runs on it.
 
-The main problem is someone could steal the OAuth2 token which means the
-attacker can:
-- create gists under your name
-- create or modify commit statuses
+The main problem with the current design is someone could steal the OAuth2 token
+which means the attacker can:
+- create gists under your machine account
+- create or modify commit statuses for the lolz
 
 
 ## Test on multiple kind of hardware simultaneously?
@@ -17,10 +28,12 @@ attacker can:
 - Install `gohci` on each of your devices, e.g. a
   [C.H.I.P.](https://getchip.com/), a [Raspberry
   Pi](https://www.raspberrypi.org/), a [BeagleBone](https://beagleboard.org/),
-  Windows, etc.
-- Register multiple webhooks to your repository, one per device, using the
-  [explanations](CONFIG.md#webhook). For each hook, use URLs in the format
-  `https://1.2.3.4/gohci/deviceX`.
+  macOS, Windows, etc.
+- Register [one webhook](CONFIG.md#webhook) on your repository per device. For
+  each hook, use URLs in the format `https://1.2.3.4/gohci/deviceX` or as your
+  choosing.
+- Each `gohci` worker is completely independent. They do not need to be all
+  located at the same physical location.
 - Setup your `Caddyfile` like this:
 
 ```
@@ -28,28 +41,19 @@ ci.example.com {
     log log/ci.example.com.log
     tls youremail@example.com
     proxy /gohci/chip chip:8080 {
-      transparent
-      without /gohci/chip
-    }
-    proxy /gohci/pine64 pine64:8080 {
-      transparent
-      without /gohci/pine64
+        transparent
+        without /gohci/chip
     }
     proxy /gohci/rpi3 raspberrypi:8080 {
-      transparent
-      without /gohci/rpi3
+        transparent
+        without /gohci/rpi3
+    }
+    proxy /gohci/win10 win10:8080 {
+        transparent
+        without /gohci/win10
     }
 }
 ```
-
-
-## What are the rules about which PRs are tested?
-
-By default, only commits in branches on the repository are tested but not PRs.
-
-You can specify `SuperUsers` to allow all PRs created by these users to be
-tested automatically. These users can also comment `gohci` on any commit or PR
-to trigger a test run.
 
 
 ## Won't the auto-updater break my CI when you push broken code?
@@ -91,3 +95,13 @@ Micro computers tends to be unstable, so monitoring is recommended, even for a
 one-off solution. A good option is to setup https://uptimerobot.com which has a
 free plan with 50 monitored sites pinged at a 5 minutes interval. It supports
 sending SMS via common email-to-SMS provider functionality.
+
+
+## What's the difference with a GitHub Apps
+
+[GitHub
+Apps](https://developer.github.com/apps/differences-between-apps/#about-github-apps/)
+are generally provided by companies. In contrast, `gohci` is purely open source
+and you are in control of the whole security, including the [machine
+account](CONFIG.md#machine-account) being used. As an added benefit, it is 100%
+free.

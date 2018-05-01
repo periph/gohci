@@ -99,22 +99,38 @@ type gistFile struct {
 	d             time.Duration
 }
 
-// jobRequest is the details to run a verification job.
-type jobRequest struct {
-	p          project
-	useSSH     bool     // useSSH tells to use ssh instead of https
-	commitHash string   // commit hash, not a ref
-	pullID     int      // pullID is the PR ID if relevant
-	gopath     string   // Cache of GOPATH
-	path       string   // Cache of PATH
-	env        []string // Precomputed environment variables
+//
+
+// check is a single command to run.
+type check struct {
+	Cmd []string // Command to run.
+	Env []string // Optional environment variables to use.
 }
 
-// newJobRequest creates a new test request for project 'p' on commitHash
+// jobRequest is the details to run a verification job.
+//
+// It defines a github repository being tested in the worker gohci.yml
+// configuration file, along the alternate path to use and the checks to run.
+type jobRequest struct {
+	org        string // Organisation name (e.g. a user)
+	repo       string // Project name
+	altPath    string // Alternative package path to use. Defaults to the github canonical path.
+	commitHash string // commit hash, not a ref
+	useSSH     bool   // useSSH tells to use ssh instead of https
+	pullID     int    // pullID is the PR ID if relevant
+
+	gopath string   // Cache of GOPATH
+	path   string   // Cache of PATH
+	env    []string // Precomputed environment variables
+
+	checks []check // Commands to run to test the repository. They are run one after the other from the repository's root.
+}
+
+// newJobRequest creates a new test request for project 'org/repo' on commitHash
 // and/or pullID.
-func newJobRequest(p project, useSSH bool, wd, commitHash string, pullID int) *jobRequest {
+func newJobRequest(org, repo, altPath, commitHash string, useSSH bool, pullID int, wd string) *jobRequest {
 	// Organization names cannot contain an underscore so it 'should' be fine.
-	gopath := filepath.Join(wd, p.getOrg()+"_"+p.getRepo())
+	gopath := filepath.Join(wd, org+"_"+repo)
 	path := filepath.Join(gopath, "bin") + string(os.PathListSeparator) + os.Getenv("PATH")
 	// Setup the environment variables.
 	oldenv := os.Environ()
@@ -131,9 +147,11 @@ func newJobRequest(p project, useSSH bool, wd, commitHash string, pullID int) *j
 	env = append(env, "PATH="+path)
 
 	return &jobRequest{
-		p:          p,
-		useSSH:     useSSH,
+		org:        org,
+		repo:       repo,
+		altPath:    altPath,
 		commitHash: commitHash,
+		useSSH:     useSSH,
 		pullID:     pullID,
 		gopath:     gopath,
 		path:       path,
@@ -143,16 +161,30 @@ func newJobRequest(p project, useSSH bool, wd, commitHash string, pullID int) *j
 
 func (j *jobRequest) String() string {
 	if j.pullID != 0 {
-		return fmt.Sprintf("https://github.com/%s/pull/%d at https://github.com/%s/commit/%s", getID(j.p), j.pullID, getID(j.p), j.commitHash[:12])
+		return fmt.Sprintf("https://github.com/%s/pull/%d at https://github.com/%s/commit/%s", j.getID(), j.pullID, j.getID(), j.commitHash[:12])
 	}
-	return fmt.Sprintf("https://github.com/%s/commit/%s", getID(j.p), j.commitHash[:12])
+	return fmt.Sprintf("https://github.com/%s/commit/%s", j.getID(), j.commitHash[:12])
+}
+
+// getPath returns the path to checkout the repository into. It may be
+// different than "github.com/<org>/<repo>".
+func (j *jobRequest) getPath() string {
+	if len(j.altPath) != 0 {
+		return strings.Replace(j.altPath, "/", string(os.PathSeparator), -1)
+	}
+	return filepath.Join("github.com", j.org, j.repo)
 }
 
 func (j *jobRequest) cloneURL() string {
 	if j.useSSH {
-		return "git@github.com:" + getID(j.p)
+		return "git@github.com:" + j.getID()
 	}
-	return "https://github.com/" + getID(j.p)
+	return "https://github.com/" + j.getID()
+}
+
+// getID returns the "org/repo" identifier for a project.
+func (j *jobRequest) getID() string {
+	return j.org + "/" + j.repo
 }
 
 // findCommitHash tries to get the HEAD commit for the PR # or master branch.
@@ -261,13 +293,13 @@ func (j *jobRequest) fetchRepo(repoRel string) (string, bool) {
 // cloneOrFetch is meant to be used on the primary repository, making sure it
 // is checked out at the expected commit or Pull Request.
 func (j *jobRequest) cloneOrFetch(c chan<- setupWorkResult) {
-	p := filepath.Join(j.gopath, "src", j.p.getPath())
+	p := filepath.Join(j.gopath, "src", j.getPath())
 	if _, err := os.Stat(p); err != nil && !os.IsNotExist(err) {
 		c <- setupWorkResult{"<failure>\n" + err.Error() + "\n", false}
 		return
 	} else if err != nil {
 		// Directory doesn't exist, need to clone.
-		stdout, ok := j.run(filepath.Dir(j.p.getPath()), nil, []string{"git", "clone", "--quiet", j.cloneURL()}, false)
+		stdout, ok := j.run(filepath.Dir(j.getPath()), nil, []string{"git", "clone", "--quiet", j.cloneURL()}, false)
 		c <- setupWorkResult{stdout, ok}
 		if j.pullID == 0 || !ok {
 			// For PRs, the commit has to be fetched manually.
@@ -280,12 +312,12 @@ func (j *jobRequest) cloneOrFetch(c chan<- setupWorkResult) {
 	if j.pullID != 0 {
 		args = append(args, fmt.Sprintf("pull/%d/head", j.pullID))
 	}
-	stdout, ok := j.run(j.p.getPath(), nil, args, false)
+	stdout, ok := j.run(j.getPath(), nil, args, false)
 	c <- setupWorkResult{stdout, ok}
 }
 
 func (j *jobRequest) assertDir() error {
-	repoPath := filepath.Join(j.gopath, "src", j.p.getPath())
+	repoPath := filepath.Join(j.gopath, "src", j.getPath())
 	up := filepath.Dir(repoPath)
 	err := os.MkdirAll(up, 0700)
 	log.Printf("MkdirAll(%q) -> %v", up, err)
@@ -309,7 +341,7 @@ func (j *jobRequest) syncParallel(c chan<- setupWorkResult) {
 	// git clone / go get will have a race condition if the directory doesn't
 	// exist.
 	root := filepath.Join(j.gopath, "src")
-	repoPath := filepath.Join(root, j.p.getPath())
+	repoPath := filepath.Join(root, j.getPath())
 	if err := j.assertDir(); err != nil {
 		c <- setupWorkResult{"<failure>\n" + err.Error() + "\n", false}
 		return
@@ -404,7 +436,7 @@ func (j *jobRequest) checkout() (string, bool) {
 	out := ""
 	ok := true
 	for _, c := range setupCmds {
-		stdout, ok2 := j.run(j.p.getPath(), nil, c, false)
+		stdout, ok2 := j.run(j.getPath(), nil, c, false)
 		out += stdout
 		if ok = ok && ok2; !ok {
 			break
@@ -417,12 +449,7 @@ func (j *jobRequest) checkout() (string, bool) {
 //
 // It reads the ".gohci.yml" if there's one.
 func (j *jobRequest) parseConfig(name string) ([]check, string) {
-	checks := j.p.getChecks()
-	if len(checks) != 0 {
-		// Local checks always override the ones defined in the repository.
-		return checks, "Using worker's checks defined in its gohci.yml"
-	}
-	if p := loadProjectConfig(filepath.Join(j.gopath, "src", j.p.getPath(), ".gohci.yml")); p != nil {
+	if p := loadProjectConfig(filepath.Join(j.gopath, "src", j.getPath(), ".gohci.yml")); p != nil {
 		for _, w := range p.Workers {
 			if w.Name == name {
 				return w.Checks, "Using worker specific checks from the repo's .gohci.yml"
@@ -444,7 +471,7 @@ func (j *jobRequest) runChecks(checks []check, results chan<- gistFile) bool {
 	nb := len(strconv.Itoa(len(checks)))
 	for i, c := range checks {
 		start := time.Now()
-		stdout, ok2 := j.run(j.p.getPath(), c.Env, c.Cmd, true)
+		stdout, ok2 := j.run(j.getPath(), c.Env, c.Cmd, true)
 		results <- gistFile{fmt.Sprintf("cmd%0*d", nb, i+1), stdout, ok2, time.Since(start)}
 		// Still run the other tests.
 		ok = ok && ok2

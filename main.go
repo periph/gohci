@@ -24,10 +24,10 @@ import (
 )
 
 // runLocal runs the checks run.
-func runLocal(w worker, p project, commitHash string, useSSH bool) error {
+func runLocal(w worker, org, repo, altpath, commitHash string, useSSH bool) error {
 	log.Printf("Running locally")
 	// The reason for using the async version is that it creates the status.
-	w.enqueueCheck(p, useSSH, commitHash, 0, nil)
+	w.enqueueCheck(org, repo, altpath, commitHash, useSSH, 0, nil)
 	w.wait()
 	// TODO(maruel): Return any error that occurred.
 	return nil
@@ -73,8 +73,7 @@ func mainImpl() error {
 	w := newWorkerQueue(c.Name, wd, c.Oauth2AccessToken)
 	if len(*test) != 0 {
 		parts := strings.SplitN(*test, "/", 2)
-		p := projectDef{Org: parts[0], Repo: parts[1], AltPath: *alt}
-		return runLocal(w, &p, *commit, *useSSH)
+		return runLocal(w, parts[0], parts[1], *alt, *commit, *useSSH)
 	}
 	return runServer(c, w, fileName)
 }

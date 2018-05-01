@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"reflect"
 	"strings"
@@ -108,12 +109,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("- invalid secret")
 		return
 	}
-	s.handleHook(github.WebHookType(r), payload)
+	s.handleHook(github.WebHookType(r), payload, r.URL.Query())
 	io.WriteString(w, "{}")
 }
 
 // handleHook handles a validated github webhook.
-func (s *server) handleHook(t string, payload []byte) {
+func (s *server) handleHook(t string, payload []byte, values url.Values) {
 	if t == "ping" {
 		return
 	}
@@ -122,36 +123,49 @@ func (s *server) handleHook(t string, payload []byte) {
 		log.Printf("- invalid payload for hook %s\n%s", t, payload)
 		return
 	}
+	// Look explicitly at query arguments. Two are supported:
+	// - altPath
+	// - superUsers
+	// These defines additional settings.
+	altPath := values.Get("altPath")
+	var superUsers []string
+	if s := values.Get("superUsers"); s != "" {
+		superUsers = strings.Split(s, ",")
+	}
+	log.Printf("altPath=%s; superUsers=%s", altPath, strings.Join(superUsers, ","))
 	// Process the rest asynchronously so the hook doesn't take too long.
 	switch e := event.(type) {
 	case *github.CommitCommentEvent:
-		s.handleCommitComment(e)
+		s.handleCommitComment(e, altPath, superUsers)
 	case *github.IssueCommentEvent:
-		s.handleIssueComment(e)
+		s.handleIssueComment(e, altPath, superUsers)
 	case *github.PullRequestEvent:
-		s.handlePullRequest(e)
+		s.handlePullRequest(e, altPath, superUsers)
 	case *github.PullRequestReviewCommentEvent:
-		s.handlePullRequestReviewComment(e)
+		s.handlePullRequestReviewComment(e, altPath, superUsers)
 	case *github.PushEvent:
-		s.handlePush(e)
+		s.handlePush(e, altPath)
 	default:
 		log.Printf("- ignoring hook type %s", reflect.TypeOf(e).Elem().Name())
 	}
 }
 
 // https://developer.github.com/v3/activity/events/types/#commitcommentevent
-func (s *server) handleCommitComment(e *github.CommitCommentEvent) {
-	p := s.c.getProject(*e.Repo.Owner.Login, *e.Repo.Name)
-	if !p.isSuperUser(*e.Sender.Login) || strings.TrimSpace(*e.Comment.Body) != "gohci" {
+func (s *server) handleCommitComment(e *github.CommitCommentEvent, altPath string, superUsers []string) {
+	if strings.TrimSpace(*e.Comment.Body) != "gohci" {
+		log.Printf("- ignoring non 'gohci' commit comment")
+		return
+	}
+	if !isSuperUser(*e.Sender.Login, superUsers) {
 		log.Printf("- ignoring commit comment from user %q", *e.Sender.Login)
 		return
 	}
 	// TODO(maruel): The commit could be on a branch never fetched?
-	s.w.enqueueCheck(p, *e.Repo.Private, *e.Comment.CommitID, 0, nil)
+	s.w.enqueueCheck(*e.Repo.Owner.Login, *e.Repo.Name, altPath, *e.Comment.CommitID, *e.Repo.Private, 0, nil)
 }
 
 // https://developer.github.com/v3/activity/events/types/#issuecommentevent
-func (s *server) handleIssueComment(e *github.IssueCommentEvent) {
+func (s *server) handleIssueComment(e *github.IssueCommentEvent, altPath string, superUsers []string) {
 	// We'd need the PR's commit head but it is not in the webhook payload.
 	// This means we'd require read access to the issues, which the OAuth
 	// token shouldn't have. This is because there is no read access to the
@@ -164,18 +178,21 @@ func (s *server) handleIssueComment(e *github.IssueCommentEvent) {
 		log.Printf("- ignoring PR #%d comment", *e.Issue.Number)
 		return
 	}
+	if strings.TrimSpace(*e.Comment.Body) != "gohci" {
+		log.Printf("- ignoring non 'gohci' issue #%d comment", *e.Issue.Number)
+		return
+	}
 	// || *e.Issue.AuthorAssociation == "CONTRIBUTOR"
-	p := s.c.getProject(*e.Repo.Owner.Login, *e.Repo.Name)
-	if !p.isSuperUser(*e.Sender.Login) || strings.TrimSpace(*e.Comment.Body) != "gohci" {
+	if !isSuperUser(*e.Sender.Login, superUsers) {
 		log.Printf("- ignoring issue #%d comment from user %q", *e.Issue.Number, *e.Sender.Login)
 		return
 	}
 	// The commit hash is not provided. :(
-	s.w.enqueueCheck(p, *e.Repo.Private, "", *e.Issue.Number, nil)
+	s.w.enqueueCheck(*e.Repo.Owner.Login, *e.Repo.Name, altPath, "", *e.Repo.Private, *e.Issue.Number, nil)
 }
 
 // https://developer.github.com/v3/activity/events/types/#pullrequestevent
-func (s *server) handlePullRequest(e *github.PullRequestEvent) {
+func (s *server) handlePullRequest(e *github.PullRequestEvent, altPath string, superUsers []string) {
 	if *e.Action != "opened" && *e.Action != "synchronize" {
 		log.Printf("- ignoring action %q for PR from %q", *e.Action, *e.Sender.Login)
 		return
@@ -183,31 +200,33 @@ func (s *server) handlePullRequest(e *github.PullRequestEvent) {
 	log.Printf("- PR %s #%d %s %s", *e.Repo.FullName, *e.PullRequest.Number, *e.Sender.Login, *e.Action)
 	// TODO(maruel): If a reviewer is set, it has to be set by a repository
 	// owner (?) If so, then it would be safe to run.
-	p := s.c.getProject(*e.Repo.Owner.Login, *e.Repo.Name)
-	if !p.isSuperUser(*e.Sender.Login) {
+	if !isSuperUser(*e.Sender.Login, superUsers) {
 		log.Printf("- ignoring PR from not super user %q", *e.PullRequest.Head.Repo.FullName)
 		return
 	}
-	s.w.enqueueCheck(p, *e.Repo.Private, *e.PullRequest.Head.SHA, *e.PullRequest.Number, nil)
+	s.w.enqueueCheck(*e.Repo.Owner.Login, *e.Repo.Name, altPath, *e.PullRequest.Head.SHA, *e.Repo.Private, *e.PullRequest.Number, nil)
 }
 
 // https://developer.github.com/v3/activity/events/types/#pullrequestreviewcommentevent
-func (s *server) handlePullRequestReviewComment(e *github.PullRequestReviewCommentEvent) {
+func (s *server) handlePullRequestReviewComment(e *github.PullRequestReviewCommentEvent, altPath string, superUsers []string) {
 	if *e.Action != "created" && *e.Action != "edited" {
 		log.Printf("- ignoring action %s for PR #%d comment", *e.Action, *e.PullRequest.Number)
 		return
 	}
+	if strings.TrimSpace(*e.Comment.Body) != "gohci" {
+		log.Printf("- ignoring non 'gohci' issue #%d comment", *e.PullRequest.Number)
+		return
+	}
 	// || *e.PullRequest.AuthorAssociation == "CONTRIBUTOR"
-	p := s.c.getProject(*e.Repo.Owner.Login, *e.Repo.Name)
-	if !p.isSuperUser(*e.Sender.Login) || strings.TrimSpace(*e.Comment.Body) != "gohci" {
+	if !isSuperUser(*e.Sender.Login, superUsers) {
 		log.Printf("- ignoring issue #%d comment from user %q", *e.PullRequest.Number, *e.Sender.Login)
 		return
 	}
-	s.w.enqueueCheck(p, *e.Repo.Private, *e.PullRequest.Head.SHA, *e.PullRequest.Number, nil)
+	s.w.enqueueCheck(*e.Repo.Owner.Login, *e.Repo.Name, altPath, *e.PullRequest.Head.SHA, *e.Repo.Private, *e.PullRequest.Number, nil)
 }
 
 // https://developer.github.com/v3/activity/events/types/#pushevent
-func (s *server) handlePush(e *github.PushEvent) {
+func (s *server) handlePush(e *github.PushEvent, altPath string) {
 	if e.HeadCommit == nil {
 		log.Printf("- Push %s %s <deleted>", *e.Repo.FullName, *e.Ref)
 		return
@@ -229,6 +248,21 @@ func (s *server) handlePush(e *github.PushEvent) {
 			blame = []string{author}
 		}
 	}
-	p := s.c.getProject(*e.Repo.Owner.Name, *e.Repo.Name)
-	s.w.enqueueCheck(p, *e.Repo.Private, *e.HeadCommit.ID, 0, blame)
+	s.w.enqueueCheck(*e.Repo.Owner.Name, *e.Repo.Name, altPath, *e.HeadCommit.ID, *e.Repo.Private, 0, blame)
+}
+
+//
+
+// isSuperUser returns true if the user can trigger tasks.
+//
+// superUsers is a list of github accounts that can trigger a run. In practice
+// any user with write access is a super user but OAuth2 tokens with limited
+// scopes cannot get this information. :/
+func isSuperUser(u string, superUsers []string) bool {
+	for _, s := range superUsers {
+		if s == u {
+			return true
+		}
+	}
+	return false
 }

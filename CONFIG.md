@@ -8,9 +8,10 @@
   - [macOS](#macos)
   - [Worker configuration](#worker-configuration)
   - [Private repository](#private-repository)
-- [Project config](#project-config)
+- [Project](#project)
   - [Project access](#project-access)
   - [Webhook](#webhook)
+  - [Project config](#project-config)
 - [Testing](#testing)
 
 
@@ -37,7 +38,8 @@ and not use your personal account. For example, all projects for
   - Check `gist` and `repo:status`
     - Do not give any write access to this token!
   - Click `Generate token`.
-- Save this `AccessToken` string, you'll need it later.
+- Save this `AccessToken` string, you'll need it later in the worker's
+  `gohci.yml` at the `oauth2accesstoken` line.
 
 
 ## Worker setup
@@ -137,7 +139,8 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
 
 - Create `~/gohci/gohci.yml` with the default configuration:
   ```
-  cd gohci
+  mkdir -p ~/gohci
+  cd ~/gohci
   gohci
   ```
 - It will look like this, with comments added here:
@@ -145,45 +148,20 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
   # The TCP port the HTTP server should listen on. It needs to be "frontend" by an
   # HTTPS enabled proxy, like caddyserver.com
   port: 8080
-  # The github webhook secret when receiving events:
-  webhooksecret: Create a secret and set it at github.com/<user>/<repo>/settings/hooks
-  # The github oauth2 client token when updating status and gist:
+  # The GitHub webhook secret when receiving events:
+  webhooksecret: <random string>
+  # The GitHub oauth2 client token when updating status and gist:
   oauth2accesstoken: Get one at https://github.com/settings/tokens
   # Name of the worker as presented on the status:
   name: raspberrypi
-  # A single worker can run tests for multiple projects.
-  projects:
-  # Define one project per repository.
-  - org: user_name
-    repo: repo_name
-    # Alternative path to use to checkout the git repository, can be an
-    # alternative name like "golang.org/x/tools".
-    alt_path: ""
-    # Users that can trigger a job on any commit by commenting "gohci: run".
-    superusers:
-    - maintainer1
-    - maintainer2
-    # Commands to run:
-    checks:
-    - cmd:
-      - go
-      - test
-      - -race
-      - ./...
-    - cmd:
-      - go
-      - vet
-      - -unsafeptr=false
-      - ./...
-      env: []
   ```
--  Edit based on your needs.
+- Edit the values based on your needs.
+  - `oauth2accesstoken` must be set to the `AccessToken` you created at the step
+    [OAuth2 token](#oauth2-token).
 - Run `gohci` again and it will start a web server. When `gohci` is running,
   updating `gohci.yml` will make the process quit (after completing any enqueued
   checks).
 - Reboot the host and make sure `gohci` starts correctly.
-- Enable the webhook.
-- Push a commit to confirm it works!
 
 
 ### Private repository
@@ -197,21 +175,65 @@ is private. For it to work you must:
 - Put a name of the device and paste the content of the public key at
   `$HOME/.ssh/id_rsa.pub`, `%USERPROFILE%\.ssh\id_rsa.pub` on Windows.
 - Do not check `Allow write access`!
+  - This means the ssh key only works for this repository and grants read-only
+    access.
 - Click `Add key`.
 
 
-## Project config
+## Project
 
-While you can add the checks on the worker itself, you can also add them to the
-project in a file
-[.gohci.yml](https://github.com/periph/gohci/blob/master/.gohci.yml):
 
-When the worker name is not provided, this becomes the default checks. Checks on
-the worker's `gohci.yml`, if defined, always override the project's
-`.gohci.yml`.
+### Project access
 
-If the project uses an alternate import path, like `periph.io/x/gohci` for
-`github.com/periph/gohci`, this has to be defined on the worker's `gohci.yml`.
+The machine account must have access to set a [commit
+status](https://help.github.com/articles/about-statuses/):
+
+- As your normal account, visit
+  `github.com/<user>/<repo>/settings/collaboration`.
+- Add the machine account as a `Write` collaborator.
+  - Sadly `Write` access is needed even for just status update. This is fine
+    because:
+    - Your machine account doesn't have an ssh key setup.
+    - Your machine account has 2FA enabled.
+    - The OAuth2 token is read only.
+- Login as the machine account on GitHub and accept the invitation.
+
+
+### Webhook
+
+Visit to `github.com/<user>/<repo>/settings/hooks` and create a new webhook.
+
+- Payload URL: Use your worker IP address or hostname as the hook URL,
+  `https://1.2.3.4/gohci/workerA?altPath=foo.io/x/project&superusers=user1,user2,user3`.
+  - `altPath`: Set it when using [canonical import
+    path](https://golang.org/doc/go1.4#canonicalimports). For example,
+    `periph.io/x/gohci`. Leave it unspecified otherwise, which should be the
+    general case.
+  - `superUsers`: a comma separate list of GitHub user accounts. These users
+    can trigger a check run by typing the comment `gohci` on a PR or a commit as
+    explained in the
+    [FAQ](FAQ.md#what-are-the-rules-about-which-prs-are-tested).
+  - Both altPath and superUsers are optional.
+- Content type: select `application/json`.
+- Type the random string found in `webhooksecret` in `gohci.yml`.
+- Click `Let me select individual events` and check:
+  - `Commit comment`
+  - `Issue Comment`
+  - `Pull request`
+  - `Pull request review`
+  - `Pull request review comment`
+  - `Push`
+  - All the items except the last one are for the magic `gohci` hotword by super
+    users. The last one is for post merge testing.
+
+
+### Project config
+
+Now it's time to customize the checks run via a
+[.gohci.yml](https://github.com/periph/gohci/blob/master/.gohci.yml) in the root
+directory of your repository. When the worker name is not provided, this becomes
+the default checks as in this
+example:
 
 ```
 # See https://github.com/periph/gohci
@@ -232,53 +254,12 @@ workers:
   - cmd:
     - go
     - test
-    - -race
     - ./...
 ```
 
 
-### Project access
-
-The machine account must have access to set a [commit
-status](https://help.github.com/articles/about-statuses/).
-
-- As your normal account, visit
-  `github.com/<user>/<repo>/settings/collaboration`.
-- Add the machine account as a `Write` collaborator.
-  - Sadly `Write` access is needed even for just status update. This is fine
-    because:
-    - Your machine account doesn't have an ssh key setup.
-    - Your machine account has 2FA enabled.
-    - The OAuth2 token is read only.
-- Login as the machine account on github and accept the invitation.
-
-
-### Webhook
-
-Visit to `github.com/<user>/<repo>/settings/hooks` and create a new webhook.
-
-- Payload URL: Use your worker IP address or hostname as the hook URL,
-  `https://1.2.3.4/gohci/workerA`.
-- Content type: select `application/json`.
-- Type a random string, that you will put in `WebHookSecret` in `gohci.yml`.
-- Click `Let me select individual events` and check: `Commit comment`, `Issue
-  Comment`, `Pull request`, `Pull request review`, `Pull request review comment`
-  and `Push`.
-- Keep the tab open but don't enable it yet; enable the webhook once the worker
-  is up and running.
-
-
 ## Testing
 
-To test your hook, run:
-
-```
-gohci -test periph/gohci
-```
-
-where `periph/gohci` is replaced with the repository you want to fetch and test
-at `HEAD`. Use `-commit` and it'll create the gist and the status on the commit.
-Useful when testing checks.
-
-The github's "_Redeliver hook_" functionality is also very useful to test your
-setup.
+Push a new branch to your repository with a `.gohci.yml` file. Check the gohci
+worker logs to see progress, and look at the commits to see status being
+updated. You can see it at `github.com/<user>/<repo>/commits/<branch>`
