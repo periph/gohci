@@ -103,16 +103,10 @@ type workerConfig struct {
 //
 // It saves a reformatted version on disk if it was not in the canonical format.
 func loadConfig(fileName string) (*workerConfig, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		hostname = "gohci"
-	}
 	// Create a dummy config file to make it easier to edit.
 	c := &workerConfig{
 		Port:              8080,
-		WebHookSecret:     "",
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
-		Name:              hostname,
 		Projects: []projectDef{
 			{
 				Org:     "the user",
@@ -128,13 +122,19 @@ func loadConfig(fileName string) (*workerConfig, error) {
 		},
 	}
 	b, err := ioutil.ReadFile(fileName)
-	if err != nil || c.WebHookSecret == "" {
+	if err != nil || c.Name == "" || c.WebHookSecret == "" {
+		// Defer these since they require actual work.
 		if c.WebHookSecret == "" {
 			var b [32]byte
 			if _, err := rand.Read(b[:]); err != nil {
 				return nil, err
 			}
 			c.WebHookSecret = base64.RawURLEncoding.EncodeToString(b[:])
+		}
+		if c.Name == "" {
+			if c.Name, _ = os.Hostname(); c.Name == "" {
+				c.Name = "gohci"
+			}
 		}
 		b, err = yaml.Marshal(c)
 		if err != nil {
