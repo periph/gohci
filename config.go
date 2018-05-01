@@ -122,37 +122,45 @@ func loadConfig(fileName string) (*workerConfig, error) {
 		},
 	}
 	b, err := ioutil.ReadFile(fileName)
-	if err != nil || c.Name == "" || c.WebHookSecret == "" {
-		// Defer these since they require actual work.
-		if c.WebHookSecret == "" {
-			var b [32]byte
-			if _, err := rand.Read(b[:]); err != nil {
-				return nil, err
-			}
-			c.WebHookSecret = base64.RawURLEncoding.EncodeToString(b[:])
-		}
-		if c.Name == "" {
-			if c.Name, _ = os.Hostname(); c.Name == "" {
-				c.Name = "gohci"
-			}
-		}
-		b, err = yaml.Marshal(c)
-		if err != nil {
-			return nil, err
-		}
-		// Makes it editable in notepad.exe.
-		if runtime.GOOS == "windows" {
-			b = bytes.Replace(b, []byte("\n"), []byte("\r\n"), -1)
-		}
-		if err = ioutil.WriteFile(fileName, b, 0600); err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("wrote new %s", fileName)
+	if err != nil {
+		return nil, rewrite(fileName, c)
 	}
 	if err = yaml.Unmarshal(b, c); err != nil {
+		rewrite(fileName, c)
 		return nil, err
 	}
+	if c.Name == "" || c.WebHookSecret == "" {
+		return nil, rewrite(fileName, c)
+	}
 	return c, nil
+}
+
+func rewrite(fileName string, c *workerConfig) error {
+	// Defer these since they require actual work.
+	if c.WebHookSecret == "" {
+		var b [32]byte
+		if _, err := rand.Read(b[:]); err != nil {
+			return err
+		}
+		c.WebHookSecret = base64.RawURLEncoding.EncodeToString(b[:])
+	}
+	if c.Name == "" {
+		if c.Name, _ = os.Hostname(); c.Name == "" {
+			c.Name = "gohci"
+		}
+	}
+	b, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	// Makes it editable in notepad.exe.
+	if runtime.GOOS == "windows" {
+		b = bytes.Replace(b, []byte("\n"), []byte("\r\n"), -1)
+	}
+	if err = ioutil.WriteFile(fileName, b, 0600); err != nil {
+		return err
+	}
+	return fmt.Errorf("wrote new %s", fileName)
 }
 
 // getName implements serverConfig.
