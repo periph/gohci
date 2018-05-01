@@ -217,11 +217,10 @@ Visit to `github.com/<user>/<repo>/settings/hooks` and create a new webhook.
 - Content type: select `application/json`.
 - Type the random string found in `webhooksecret` in `gohci.yml`.
 - Click `Let me select individual events` and check:
-  - `Commit comment`
-  - `Issue Comment`
-  - `Pull request`
-  - `Pull request review`
-  - `Pull request review comment`
+  - `Commit comments`
+  - `Issue Comments`
+  - `Pull requests`
+  - `Pull request review comments`
   - `Push`
   - All the items except the last one are for the magic `gohci` hotword by super
     users. The last one is for post merge testing.
