@@ -1,66 +1,46 @@
-## Initial Setup
+# Configuration
 
-- [Initial Setup](#initial-setup)
+- [Machine account](#machine-account)
   - [OAuth2 token](#oauth2-token)
-  - [Project access](#project-access)
-  - [Webhook](#webhook)
-- [Worker Setup](#worker-setup)
+- [Worker setup](#worker-setup)
   - [Debian](#debian)
   - [Windows](#windows)
   - [macOS](#macos)
-  - [Configuration](#configuration)
+  - [Worker configuration](#worker-configuration)
   - [Private repository](#private-repository)
 - [Project config](#project-config)
+  - [Project access](#project-access)
+  - [Webhook](#webhook)
+- [Testing](#testing)
 
-Before starting the worker, some initial configuration is necessary.
+
+## Machine account
+
+It is preferable to create a ['machine
+account'](https://help.github.com/articles/github-terms-of-service/#2-account-requirements)
+and not use your personal account. For example, all projects for
+[periph.io](https://periph.io) are tested with the account
+[github.com/gohci-bot](https://github.com/gohci-bot).
+
+- Visit [github.com/join](https://github.com/join) and create a new account,
+  preferably with suffix `-bot`.
+- Visit [github.com/settings/security](https://github.com/settings/security) and
+  turn on `Two-factor authentication`.
+  - You have it enabled with your personal account, right? Right?
 
 
 ### OAuth2 token
 
-It is preferable to create a bot account and not use your personal account.
-GitHub ToS calls it ['machine
-account'](https://help.github.com/articles/github-terms-of-service/#2-account-requirements).
-For example, all projects for [periph.io](https://periph.io) are tested with the
-account [github.com/gohci-bot](https://github.com/gohci-bot).
-
-- Visit https://github.com/settings/tokens while logged in with your bot
-  account.
-- Click `Personal access tokens` near the bottom in the left list
-- Click `Generate new token`
-- Add a description like `gohci`
-- Check `gist` and `repo:status`
-  - Do not give any write access to this token!
-- Click `Generate token`
-- Put the hex string into `AccessToken` in `gohci.yml`. This is needed to
-  create the gists and put success/failure status on the Pull Requests.
+- Visit [github.com/settings/tokens](https://github.com/settings/tokens).
+  - Click `Generate new token` button on the top right.
+  - Add a description like `gohci`
+  - Check `gist` and `repo:status`
+    - Do not give any write access to this token!
+  - Click `Generate token`.
+- Save this `AccessToken` string, you'll need it later.
 
 
-### Project access
-
-The bot account must have access to set a [commit
-status](https://help.github.com/articles/about-statuses/).
-
-- As your normal account, add the bot account as a 'Write' collaborator.
-  - Sadly 'Write' access is needed even for just status update.
-- Login as the bot account on github and accept the invitation.
-
-
-### Webhook
-
-Visit to `github.com/user/repo/settings/hooks` and create a new webhook.
-
-- Payload URL: Use your worker IP address or hostname as the hook URL,
-  `https://1.2.3.4/gohci/workerA`.
-- Content type: select 'application/json'.
-- Type a random string, that you will put in `WebHookSecret` in `gohci.yml`.
-- Click `Let me select individual events` and check: `Commit comment`, `Issue
-  Comment`, `Pull request`, `Pull request review`, `Pull request review comment`
-  and `Push`.
-- Keep the tab open but don't enable it yet; enable the webhook once the worker
-  is up and running.
-
-
-## Worker Setup
+## Worker setup
 
 Now it's time to setup the worker itself.
 
@@ -153,7 +133,7 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
 - Enable auto-login via system preferences.
 
 
-### Configuration
+### Worker configuration
 
 - Create `~/gohci/gohci.yml` with the default configuration:
   ```
@@ -166,7 +146,7 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
   # HTTPS enabled proxy, like caddyserver.com
   port: 8080
   # The github webhook secret when receiving events:
-  webhooksecret: Create a secret and set it at github.com/user/repo/settings/hooks
+  webhooksecret: Create a secret and set it at github.com/<user>/<repo>/settings/hooks
   # The github oauth2 client token when updating status and gist:
   oauth2accesstoken: Get one at https://github.com/settings/tokens
   # Name of the worker as presented on the status:
@@ -212,7 +192,8 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
 is private. For it to work you must:
 - On your device, create a key via `ssh-keygen -C "raspberrypi"` and do not
   specify a password.
-- Visit `github.com/user/repo/settings/keys`, click `Add deploy key`.
+- Visit `github.com/<user>/<repo>/settings/keys`.
+- Click `Add deploy key`.
 - Put a name of the device and paste the content of the public key at
   `$HOME/.ssh/id_rsa.pub`, `%USERPROFILE%\.ssh\id_rsa.pub` on Windows.
 - Do not check `Allow write access`!
@@ -254,6 +235,37 @@ workers:
     - -race
     - ./...
 ```
+
+
+### Project access
+
+The machine account must have access to set a [commit
+status](https://help.github.com/articles/about-statuses/).
+
+- As your normal account, visit
+  `github.com/<user>/<repo>/settings/collaboration`.
+- Add the machine account as a `Write` collaborator.
+  - Sadly `Write` access is needed even for just status update. This is fine
+    because:
+    - Your machine account doesn't have an ssh key setup.
+    - Your machine account has 2FA enabled.
+    - The OAuth2 token is read only.
+- Login as the machine account on github and accept the invitation.
+
+
+### Webhook
+
+Visit to `github.com/<user>/<repo>/settings/hooks` and create a new webhook.
+
+- Payload URL: Use your worker IP address or hostname as the hook URL,
+  `https://1.2.3.4/gohci/workerA`.
+- Content type: select `application/json`.
+- Type a random string, that you will put in `WebHookSecret` in `gohci.yml`.
+- Click `Let me select individual events` and check: `Commit comment`, `Issue
+  Comment`, `Pull request`, `Pull request review`, `Pull request review comment`
+  and `Push`.
+- Keep the tab open but don't enable it yet; enable the webhook once the worker
+  is up and running.
 
 
 ## Testing
