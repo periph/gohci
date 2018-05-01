@@ -6,6 +6,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -108,7 +110,7 @@ func loadConfig(fileName string) (*workerConfig, error) {
 	// Create a dummy config file to make it easier to edit.
 	c := &workerConfig{
 		Port:              8080,
-		WebHookSecret:     "Create a secret and set it at github.com/user/repo/settings/hooks",
+		WebHookSecret:     "",
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
 		Name:              hostname,
 		Projects: []projectDef{
@@ -126,7 +128,14 @@ func loadConfig(fileName string) (*workerConfig, error) {
 		},
 	}
 	b, err := ioutil.ReadFile(fileName)
-	if err != nil {
+	if err != nil || c.WebHookSecret == "" {
+		if c.WebHookSecret == "" {
+			var b [32]byte
+			if _, err := rand.Read(b[:]); err != nil {
+				return nil, err
+			}
+			c.WebHookSecret = base64.RawURLEncoding.EncodeToString(b[:])
+		}
 		b, err = yaml.Marshal(c)
 		if err != nil {
 			return nil, err
