@@ -109,12 +109,19 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("- invalid secret")
 		return
 	}
-	s.handleHook(github.WebHookType(r), payload, r.URL.Query())
+	altPath, superUsers, err := validateArgs(r.URL.Query())
+	if err != nil {
+		// Immediately return an error. This helps catch typos.
+		log.Printf("Invalid query argument, check your webhook URL: %q; %v", r.URL.String(), err)
+		http.Error(w, "Invalid query argument", http.StatusBadRequest)
+		return
+	}
+	s.handleHook(github.WebHookType(r), payload, altPath, superUsers)
 	io.WriteString(w, "{}")
 }
 
 // handleHook handles a validated github webhook.
-func (s *server) handleHook(t string, payload []byte, values url.Values) {
+func (s *server) handleHook(t string, payload []byte, altPath string, superUsers []string) {
 	if t == "ping" {
 		return
 	}
@@ -122,15 +129,6 @@ func (s *server) handleHook(t string, payload []byte, values url.Values) {
 	if err != nil {
 		log.Printf("- invalid payload for hook %s\n%s", t, payload)
 		return
-	}
-	// Look explicitly at query arguments. Two are supported:
-	// - altPath
-	// - superUsers
-	// These defines additional settings.
-	altPath := values.Get("altPath")
-	var superUsers []string
-	if s := values.Get("superUsers"); s != "" {
-		superUsers = strings.Split(s, ",")
 	}
 	log.Printf("altPath=%s; superUsers=%s", altPath, strings.Join(superUsers, ","))
 	// Process the rest asynchronously so the hook doesn't take too long.
@@ -252,6 +250,58 @@ func (s *server) handlePush(e *github.PushEvent, altPath string) {
 }
 
 //
+
+// Look explicitly at query arguments. Two are supported:
+// - altPath
+// - superUsers
+// These defines additional settings.
+func validateArgs(values url.Values) (string, []string, error) {
+	// Make sure there is no unknown keys. This is to catch typos, as for example
+	// it is easy to mistype 'altpath' instead of 'altPath'.
+	for k := range values {
+		if k != "altPath" && k != "secretUsers" {
+			return "", nil, fmt.Errorf("unexpected key %q", k)
+		}
+	}
+	// Limit the allowed characters in altPath.
+	altPath := values.Get("altPath")
+	if strings.Contains(altPath, "//") || strings.Contains(altPath, "..") {
+		return "", nil, fmt.Errorf("invalid altPath %q: contains invalid characters", altPath)
+	}
+	u, err := url.Parse("https://" + altPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid altPath %q: %v", altPath, err)
+	}
+	if u.Scheme != "https" || u.User != nil || u.Host == "" || u.Path == "" || u.RawQuery != "" || u.Fragment != "" {
+		return "", nil, fmt.Errorf("invalid altPath %q: unexpected url format", altPath)
+	}
+	var superUsers []string
+	if s := values.Get("superUsers"); s != "" {
+		superUsers = strings.Split(s, ",")
+		for _, s := range superUsers {
+			// For https://github.com/join:
+			// "Username may only contain alphanumeric characters or single hyphens,
+			// and cannot begin or end with a hyphen"
+			if !isSubset(s, "abcdefghijklmnopqrstuvwxyz012345678-") {
+				return "", nil, fmt.Errorf("invalid superUser: %q", s)
+			}
+		}
+	}
+	return altPath, superUsers, nil
+}
+
+// isSubset returns true if s is composed of characters from c and is not empty.
+func isSubset(s, allowed string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if !strings.Contains(allowed, string(c)) {
+			return false
+		}
+	}
+	return true
+}
 
 // isSuperUser returns true if the user can trigger tasks.
 //

@@ -26,7 +26,8 @@ and not use your personal account. For example, all projects for
 - Visit [github.com/join](https://github.com/join) and create a new account,
   preferably with suffix `-bot`.
 - Visit [github.com/settings/security](https://github.com/settings/security) and
-  turn on `Two-factor authentication`.
+  turn on [Two-factor
+  authentication](https://help.github.com/articles/about-two-factor-authentication/).
   - You have it enabled with your personal account, right? Right?
 
 
@@ -115,8 +116,8 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
   mkdir %USERPROFILE%/gohci
   cd %USERPROFILE%/gohci
   ```
-- Run `gohci-worker` twice to make sure the firewall popup is shown and you allow the
-  app.
+- Run `gohci-worker` twice to make sure the firewall popup is shown and you
+  allow the app.
 
 
 ### macOS
@@ -228,6 +229,9 @@ Visit to `github.com/<user>/<repo>/settings/hooks` and create a new webhook.
   - `Push`
   - All the items except the last one are for the magic `gohci` hotword by super
     users. The last one is for post merge testing.
+- Save the settings. If the 'ping' is red, it means that you may have typoed the
+  query argments (altPath or superUsers) or that the HTTPS proxy is
+  misconfigured.
 
 
 ### Project config
