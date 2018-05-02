@@ -41,9 +41,9 @@ type Check struct {
 	Env []string // Optional environment variables to use.
 }
 
-// WorkerProjectConfig is the project configuration via ".gohci.yml" for a
+// ProjectWorkerConfig is the project configuration via ".gohci.yml" for a
 // specific worker.
-type WorkerProjectConfig struct {
+type ProjectWorkerConfig struct {
 	// Name is the worker which this config belongs to.
 	//
 	// If empty, this is the default configuration to use.
@@ -57,5 +57,5 @@ type WorkerProjectConfig struct {
 // the root directory of the repository.
 type ProjectConfig struct {
 	Version int                   // Current 1
-	Workers []WorkerProjectConfig //
+	Workers []ProjectWorkerConfig //
 }
