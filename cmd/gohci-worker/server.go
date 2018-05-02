@@ -259,7 +259,7 @@ func validateArgs(values url.Values) (string, []string, error) {
 	// Make sure there is no unknown keys. This is to catch typos, as for example
 	// it is easy to mistype 'altpath' instead of 'altPath'.
 	for k := range values {
-		if k != "altPath" && k != "secretUsers" {
+		if k != "altPath" && k != "superUsers" {
 			return "", nil, fmt.Errorf("unexpected key %q", k)
 		}
 	}
