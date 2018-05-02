@@ -6,7 +6,7 @@
     <string>gohci</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/Users/gohci/go/bin/gohci</string>
+      <string>/Users/gohci/go/bin/gohci-worker</string>
     </array>
     <!-- Edit if you installed Go locally.
     <key>EnvironmentVariables</key>

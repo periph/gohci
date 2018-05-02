@@ -25,15 +25,15 @@ which means the attacker can:
 
 ## Test on multiple kind of hardware simultaneously?
 
-- Install `gohci` on each of your devices, e.g. a
+- Install `gohci-worker` on each of your devices, e.g. a
   [C.H.I.P.](https://getchip.com/), a [Raspberry
   Pi](https://www.raspberrypi.org/), a [BeagleBone](https://beagleboard.org/),
   macOS, Windows, etc.
 - Register [one webhook](CONFIG.md#webhook) on your repository per device. For
   each hook, use URLs in the format `https://1.2.3.4/gohci/deviceX` or as your
   choosing.
-- Each `gohci` worker is completely independent. They do not need to be all
-  located at the same physical location.
+- Each `gohci-worker` worker is completely independent. They do not need to be
+  all located at the same physical location.
 - Setup your `Caddyfile` like this:
 
 ```
@@ -58,10 +58,10 @@ ci.example.com {
 
 ## Won't the auto-updater break my CI when you push broken code?
 
-Maybe. I'll try to keep `gohci` always in a working condition but it can fail
-from time to time. So feel free to fork the `gohci` repository and run from your
-copy. Don't forget to update `gohci_update.timer` to pull from your repository
-instead.
+Maybe. I'll try to keep `gohci-worker` always in a working condition but it can
+fail from time to time. So feel free to fork the `gohci` repository and run from
+your copy. Don't forget to update `gohci_update.timer` to pull from your
+repository instead.
 
 
 ## What's the maximum testing rate per hour?
@@ -79,9 +79,10 @@ requests. Each test run does:
 
 So a configuration defining 7 tests would sum for `3 + 1 + (2 * (7+2))` = 22
 requests. 5000/13 = *227 test runs/hour*. If you have 3 workers, this means an
-upper bound of *75 test runs/hour*. In practice, `gohci` throttles its requests
-by buffering all the updates that happen within a second so the effective number
-of requests per build is lower, i.e. you can run more tests in practice.
+upper bound of *75 test runs/hour*. In practice, `gohci-worker` throttles its
+requests by buffering all the updates that happen within a second so the
+effective number of requests per build is lower, i.e. you can run more tests in
+practice.
 
 
 ## Can you add support for `gd`, `glide`, `vgo`, etc?

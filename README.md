@@ -61,8 +61,8 @@ It hardly can get any simpler:
 - Each check's stdout is attached to the gist as they complete.
 - The commit's status is updated "_live_" on Github. This is pretty cool to see
   in action on a GitHub PR.
-- `gohci` exits whenever the executable or `gohci.yml` is updated; making it
-  easy to use an auto-updating mechanism.
+- `gohci-worker` exits whenever the executable or `gohci.yml` is updated; making
+  it easy to use an auto-updating mechanism.
 
 Not convinced? Read the [FAQ.md](FAQ.md) for additional information.
 

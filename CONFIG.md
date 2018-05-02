@@ -58,11 +58,12 @@ This includes Raspbian and Ubuntu.
     recent version.
   - See [official instructions](https://golang.org/doc/install#install) for
     help.
+- Create a `gohci` standard account (optional).
 - Setup `$PATH` to include `~/go/bin`
 - Install git.
-- Install `gohci`.
+- Install `gohci-worker`.
 - Create the directory `gohci`.
-- Set up the system to run `gohci` automatically and update it every
+- Set up the system to run `gohci-worker` automatically and update it every
   day via [`systemd/setup.sh`](systemd/setup.sh) .
 
 Overall it looks like this:
@@ -71,7 +72,7 @@ Overall it looks like this:
 sudo apt install git
 export PATH="$PATH:$HOME/go/bin"
 echo 'export PATH="$PATH:$HOME/go/bin"' >> ~/.bash_aliases
-go get -u -v periph.io/x/gohci
+go get -u -v periph.io/x/gohci/cmd/gohci-worker
 mkdir -p ~/gohci
 $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
 ```
@@ -84,7 +85,8 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
   - See [official instructions](https://golang.org/doc/install#install) for
     help.
 - Install [git](https://git-scm.com)
-- First enable auto-login (optionally on a fresh low privilege account).
+- Create a `gohci` standard account (optional).
+- Enable auto-login.
   - Win-R
   - `netplwiz`
   - Uncheck _Users must enter a user name and password to use this computer_.
@@ -97,23 +99,23 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
   title gohci
   cd %USERPROFILE%\gohci
   :loop
-  gohci
+  gohci-worker
   goto loop
   ```
 - Auto-update can be done via the task scheduler. The following command will
-  auto-update `gohci` every day:
+  auto-update `gohci-worker` every day:
   ```
-  schtasks /create /tn "Update gohci" /tr "go get -v -u periph.io/x/gohci" /sc minute /mo 1439
+  schtasks /create /tn "Update gohci-worker" /tr "go get -v -u periph.io/x/gohci/cmd/gohci-worker" /sc minute /mo 1439
   ```
   - The task should show up with: `schtasks /query /fo table | more` or
     navigating the GUI with `taskschd.msc`.
 - Open `cmd` and run:
   ```
-  go get -u -v periph.io/x/gohci
+  go get -u -v periph.io/x/gohci/cmd/gohci-worker
   mkdir %USERPROFILE%/gohci
   cd %USERPROFILE%/gohci
   ```
-- Run `gohci` twice to make sure the firewall popup is shown and you allow the
+- Run `gohci-worker` twice to make sure the firewall popup is shown and you allow the
   app.
 
 
@@ -125,9 +127,9 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
     help.
 - Install [Homebrew](https://brew.sh) (optional).
 - Create a `gohci` standard account (optional).
-- Install `gohci` and setup for auto-start:
+- Install `gohci-worker` and setup for auto-start:
   ```
-  go get -u -v periph.io/x/gohci
+  go get -u -v periph.io/x/gohci/cmd/gohci-worker
   mkdir -p ~/Library/LaunchAgents
   cp $HOME/go/src/periph.io/x/gohci/macos/gohci.plist ~/Library/LaunchAgents
   mkdir -p ~/gohci
@@ -141,7 +143,7 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
   ```
   mkdir -p ~/gohci
   cd ~/gohci
-  gohci
+  gohci-worker
   ```
 - It will look like this, with comments added here:
   ```
@@ -158,16 +160,16 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
 - Edit the values based on your needs.
   - `oauth2accesstoken` must be set to the `AccessToken` you created at the step
     [OAuth2 token](#oauth2-token).
-- Run `gohci` again and it will start a web server. When `gohci` is running,
-  updating `gohci.yml` will make the process quit (after completing any enqueued
-  checks).
-- Reboot the host and make sure `gohci` starts correctly.
+- Run `gohci-worker` again and it will start a web server. When `gohci-worker`
+  is running, updating `gohci.yml` will make the process quit (after completing
+  any enqueued checks).
+- Reboot the host and make sure `gohci-worker` starts correctly.
 
 
 ### Private repository
 
-`gohci` will automatically switch from HTTPS to SSH checkout when the repository
-is private. For it to work you must:
+`gohci-worker` will automatically switch from HTTPS to SSH checkout when the
+repository is private. For it to work you must:
 - On your device, create a key via `ssh-keygen -C "raspberrypi"` and do not
   specify a password.
 - Visit `github.com/<user>/<repo>/settings/keys`.

@@ -18,7 +18,6 @@ import (
 
 	"github.com/google/go-github/github"
 	fsnotify "gopkg.in/fsnotify.v1"
-	"periph.io/x/gohci/lib"
 )
 
 // runServer runs the web server.
@@ -52,7 +51,7 @@ func runServer(c serverConfig, wkr worker, fileName string) error {
 		log.Printf("Failed to initialize watcher: %v", err)
 	}
 
-	lib.SetConsoleTitle(fmt.Sprintf("gohci - %s", a))
+	SetConsoleTitle(fmt.Sprintf("gohci - %s", a))
 	if err == nil {
 		select {
 		case <-w.Events:

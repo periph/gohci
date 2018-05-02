@@ -5,4 +5,4 @@
 // Package lib exposes SetConsoleTitle.
 //
 // This is mainly useful on Windows.
-package lib // import "periph.io/x/gohci/lib"
+package main

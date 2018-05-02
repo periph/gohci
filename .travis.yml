@@ -5,4 +5,4 @@ go:
   - 1.x
 
 script:
-  - go test . ./lib
+  - go test ./...
