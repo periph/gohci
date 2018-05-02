@@ -19,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/pbnjay/memory"
+	"periph.io/x/gohci"
 )
 
 // gohciBranch is a git branch name that doesn't have an high likelihood of
@@ -101,12 +102,6 @@ type gistFile struct {
 
 //
 
-// check is a single command to run.
-type check struct {
-	Cmd []string // Command to run.
-	Env []string // Optional environment variables to use.
-}
-
 // jobRequest is the details to run a verification job.
 //
 // It defines a github repository being tested in the worker gohci.yml
@@ -123,7 +118,7 @@ type jobRequest struct {
 	path   string   // Cache of PATH
 	env    []string // Precomputed environment variables
 
-	checks []check // Commands to run to test the repository. They are run one after the other from the repository's root.
+	checks []gohci.Check // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
 
 // newJobRequest creates a new test request for project 'org/repo' on commitHash
@@ -448,7 +443,7 @@ func (j *jobRequest) checkout() (string, bool) {
 // parseConfig is the third part of a job.
 //
 // It reads the ".gohci.yml" if there's one.
-func (j *jobRequest) parseConfig(name string) ([]check, string) {
+func (j *jobRequest) parseConfig(name string) ([]gohci.Check, string) {
 	if p := loadProjectConfig(filepath.Join(j.gopath, "src", j.getPath(), ".gohci.yml")); p != nil {
 		for _, w := range p.Workers {
 			if w.Name == name {
@@ -462,11 +457,11 @@ func (j *jobRequest) parseConfig(name string) ([]check, string) {
 		}
 	}
 	// Returns the default.
-	return []check{{Cmd: []string{"go", "test", "./..."}}}, "Using default check"
+	return []gohci.Check{{Cmd: []string{"go", "test", "./..."}}}, "Using default check"
 }
 
 // runChecks is the fourth part of a job.
-func (j *jobRequest) runChecks(checks []check, results chan<- gistFile) bool {
+func (j *jobRequest) runChecks(checks []gohci.Check, results chan<- gistFile) bool {
 	ok := true
 	nb := len(strconv.Itoa(len(checks)))
 	for i, c := range checks {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
+	"periph.io/x/gohci"
 )
 
 // worker is the object that handles the queue of job requests.
@@ -160,7 +161,7 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 	start := time.Now()
 	results := make(chan gistFile, 16)
 	type up struct {
-		checks []check
+		checks []gohci.Check
 		note   string
 	}
 	cc := make(chan up)
@@ -302,7 +303,7 @@ func (w *workerQueue) gist(gist *github.Gist) bool {
 
 // cmds returns the list of commands to attach to the metadata gist as a single
 // indented string.
-func cmds(checks []check) string {
+func cmds(checks []gohci.Check) string {
 	cmds := ""
 	for i, c := range checks {
 		if i != 0 {

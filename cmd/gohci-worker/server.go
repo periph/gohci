@@ -18,19 +18,20 @@ import (
 
 	"github.com/google/go-github/github"
 	fsnotify "gopkg.in/fsnotify.v1"
+	"periph.io/x/gohci"
 )
 
 // runServer runs the web server.
-func runServer(c serverConfig, wkr worker, fileName string) error {
+func runServer(c *gohci.WorkerConfig, wkr worker, fileName string) error {
 	thisFile, err := os.Executable()
 	if err != nil {
 		return err
 	}
 	log.Printf("Executable: %s", thisFile)
-	log.Printf("Name: %s", c.getName())
+	log.Printf("Name: %s", c.Name)
 	log.Printf("PATH: %s", os.Getenv("PATH"))
 
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", c.getPort()))
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", c.Port))
 	if err != nil {
 		return err
 	}
@@ -69,7 +70,7 @@ func runServer(c serverConfig, wkr worker, fileName string) error {
 
 // server is the HTTP server and manages the task queue server.
 type server struct {
-	c     serverConfig
+	c     *gohci.WorkerConfig
 	w     worker
 	start time.Time
 }
@@ -102,7 +103,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("- invalid method %s", r.Method)
 		return
 	}
-	payload, err := github.ValidatePayload(r, s.c.getWebHookSecret())
+	payload, err := github.ValidatePayload(r, []byte(s.c.WebHookSecret))
 	if err != nil {
 		http.Error(w, "Invalid secret", http.StatusUnauthorized)
 		log.Printf("- invalid secret")

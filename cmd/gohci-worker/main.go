@@ -8,8 +8,11 @@
 // on Go project on a Rasberry Pi and updating the PR status on GitHub.
 //
 // It implements:
+//
 // - github webhook webserver that triggers on pushes and PRs
+//
 // - runs a Go build and a list of user supplied commands
+//
 // - posts the stdout to a Github gist and updates the commit's status
 package main // import "periph.io/x/gohci/cmd/gohci-worker"
 

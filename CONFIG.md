@@ -158,6 +158,8 @@ $HOME/go/src/periph.io/x/gohci/systemd/setup.sh
   name: raspberrypi
   ```
 - Edit the values based on your needs.
+  - Refer to the [official
+    documentation](https://godoc.org/periph.io/x/gohci/#WorkerConfig).
   - `oauth2accesstoken` must be set to the `AccessToken` you created at the step
     [OAuth2 token](#oauth2-token).
 - Run `gohci-worker` again and it will start a web server. When `gohci-worker`
@@ -232,9 +234,13 @@ Visit to `github.com/<user>/<repo>/settings/hooks` and create a new webhook.
 
 Now it's time to customize the checks run via a
 [.gohci.yml](https://github.com/periph/gohci/blob/master/.gohci.yml) in the root
-directory of your repository. When the worker name is not provided, this becomes
-the default checks as in this
-example:
+directory of your repository.
+
+Refer to the [official
+documentation](https://godoc.org/periph.io/x/gohci/#ProjectConfig).
+
+When the worker name is not provided, this becomes
+the default checks as in this example:
 
 ```
 # See https://github.com/periph/gohci
