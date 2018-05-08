@@ -62,11 +62,32 @@ func (w *workerQueue) enqueueCheck(org, repo, altpath, commitHash string, useSSH
 	}
 	log.Printf("- Enqueuing test for %s at %s", j.getID(), j.commitHash)
 
+	// https://developer.github.com/v3/gists/#create-a-gist
+	gist := &github.Gist{
+		Description: github.String(fmt.Sprintf("%s for %s", w.name, j)),
+		// It is accessible via the URL without authentication even if "private".
+		Public: github.Bool(false),
+		Files: map[github.GistFilename]github.GistFile{
+			"setup-0-metadata": {Content: github.String(j.metadata())},
+		},
+	}
+	gist, _, err := w.client.Gists.Create(w.ctx, gist)
+	if err != nil {
+		// Don't bother running the tests. We could try setting a status but if the
+		// account can't create the gist, it is possible it can't create the
+		// status too. Need to look at the possibl failure modes and decide which
+		// are worth handling explicitly.
+		log.Printf("- Failed to create gist: %v", err)
+		return
+	}
+	log.Printf("- Gist at %s", *gist.HTMLURL)
 	// https://developer.github.com/v3/repos/statuses/#create-a-status
 	status := &github.RepoStatus{
 		State:       github.String("pending"),
-		Description: github.String("Tests pending"),
+		Description: github.String("Checks pending"),
 		Context:     &w.name,
+		// Link the gist right away, so users can click and refresh.
+		TargetURL: gist.HTMLURL,
 	}
 	if !w.status(j, status) {
 		// Don't bother running the tests.
@@ -78,7 +99,7 @@ func (w *workerQueue) enqueueCheck(org, repo, altpath, commitHash string, useSSH
 	w.wg.Add(1)
 	go func() {
 		defer w.wg.Done()
-		w.runJobRequest(j, status, blame)
+		w.runJobRequest(j, gist, status, blame)
 	}()
 }
 
@@ -92,37 +113,13 @@ func (w *workerQueue) wait() {
 //
 // It will use the ssh protocol if "useSSH" is set, https otherwise.
 // "status" is the github status to keep updating as progress is made.
-// If "blame" is not empty, an issue is created on failure. This must be a list
-// of github handles. These strings are different from what appears in the git
-// commit log. Non-team members cannot be assigned an issue, in this case the
-// API will silently drop them.
-func (w *workerQueue) runJobRequest(j *jobRequest, status *github.RepoStatus, blame []string) {
+//
+// TODO(maruel): If "blame" is not empty, an issue is created on failure.
+func (w *workerQueue) runJobRequest(j *jobRequest, gist *github.Gist, status *github.RepoStatus, blame []string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
 	log.Printf("- Running test for %s at %s", j.getID(), j.commitHash)
-	// https://developer.github.com/v3/gists/#create-a-gist
-	// It is accessible via the URL without authentication even if "private".
-	gist := &github.Gist{
-		Description: github.String(fmt.Sprintf("%s for %s", w.name, j)),
-		Public:      github.Bool(false),
-		Files: map[github.GistFilename]github.GistFile{
-			"setup-0-metadata": {Content: github.String(j.metadata())},
-		},
-	}
-	gist, _, err := w.client.Gists.Create(w.ctx, gist)
-	if err != nil {
-		// Don't bother running the tests.
-		log.Printf("- Failed to create gist: %v", err)
-		return
-	}
-	log.Printf("- Gist at %s", *gist.HTMLURL)
-
-	status.TargetURL = gist.HTMLURL
-	status.Description = github.String("Running tests")
-	if !w.status(j, status) {
-		return
-	}
-
 	failed := w.runJobRequestInner(j, gist, status)
 
 	// This requires OAuth scope 'public_repo' or 'repo'. The problem is that
@@ -134,20 +131,29 @@ func (w *workerQueue) runJobRequest(j *jobRequest, status *github.RepoStatus, bl
 		title := fmt.Sprintf("Build %q failed on %s", w.name, j.commitHash)
 		log.Printf("- Failed: %s", title)
 		log.Printf("- Blame: %v", blame)
-		// https://developer.github.com/v3/issues/#create-an-issue
-		issue := github.IssueRequest{
-			Title: &title,
-			// TODO(maruel): Add more than just the URL but that's a start.
-			Body:      gist.HTMLURL,
-			Assignees: &blame,
-		}
-		if issue, _, err := w.client.Issues.Create(w.ctx, j.org, j.repo, &issue); err != nil {
-			log.Printf("- failed to create issue: %v", err)
-		} else {
-			log.Printf("- created issue #%d", *issue.ID)
-		}
+		// createIssue(j, gist, blame, title)
 	}
 	log.Printf("- testing done: https://github.com/%s/commit/%s", j.getID(), j.commitHash[:12])
+}
+
+// createIssue creates a github issue for the job failure.
+//
+// blame must be a list of github handles. These strings are different from what
+// appears in the git commit log. Non-team members cannot be assigned an issue,
+// in this case the API will silently drop them.
+func (w *workerQueue) createIssue(j *jobRequest, gist *github.Gist, blame []string, title string) {
+	// https://developer.github.com/v3/issues/#create-an-issue
+	issue := github.IssueRequest{
+		Title: &title,
+		// TODO(maruel): Add more than just the URL but that's a start.
+		Body:      gist.HTMLURL,
+		Assignees: &blame,
+	}
+	if issue, _, err := w.client.Issues.Create(w.ctx, j.org, j.repo, &issue); err != nil {
+		log.Printf("- failed to create issue: %v", err)
+	} else {
+		log.Printf("- created issue #%d", *issue.ID)
+	}
 }
 
 // runJobRequestInner is the inner loop of runJobRequest. It updates gist as the
@@ -195,8 +201,12 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 
 	// The check #0 is setup-3-checks.
 	checkNum := 0
-	failed := false
+	failed := 0
 	total := 0
+	status.Description = github.String("Setting up")
+	w.status(j, status)
+	// Keep a backup of the gist description, will be reused.
+	gistDesc := *gist.Description
 	var delay <-chan time.Time
 	for {
 		select {
@@ -216,7 +226,7 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 					w.gist(gist)
 					w.status(j, status)
 				}
-				return failed
+				return failed != 0
 			}
 			// https://developer.github.com/v3/gists/#edit-a-gist
 			if len(r.content) == 0 {
@@ -225,37 +235,46 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 
 			firstFailure := false
 			if !r.success {
-				r.name += " (failed)"
+				r.name += " FAILED"
 				status.State = github.String("failure")
-				if !failed {
+				if failed == 0 {
 					firstFailure = true
 				}
-				failed = true
+				failed++
 			}
 			r.name += " in " + roundDuration(r.d).String()
+			gist.Files[github.GistFilename(r.name)] = github.GistFile{Content: &r.content}
 
-			// Update descriptions.
+			// Update status and gist description. The suffix is used for both.
 			suffix := ""
-			statusDesc := "Running tests"
+			statusDesc := "Setting up"
 			if total != 0 {
 				if checkNum != total {
-					suffix = fmt.Sprintf(" (%d/%d)", checkNum, total)
+					// github already prepends the status with "Pending -".
+					statusDesc = "Running"
+					if failed != 0 {
+						suffix = " FAILED"
+					}
+					suffix += fmt.Sprintf(" (%d/%d)", checkNum, total)
 					checkNum++
 				} else {
 					// Last check.
-					statusDesc = "Ran tests"
-					if !failed {
-						suffix += " (success!)"
+					if failed == 0 {
+						statusDesc = "Success"
+						suffix = fmt.Sprintf(" (%d/%d)", total, total)
 						status.State = github.String("success")
+					} else {
+						statusDesc = "FAILED"
+						suffix = fmt.Sprintf(" %d out of %d", failed, total)
 					}
 				}
+			} else if failed != 0 {
+				// Still setting up, yet failed.
+				suffix += " FAILED"
 			}
-			if failed {
-				suffix += " (failed)"
-			}
+			// Always add duration up to now.
 			suffix += " in " + roundDuration(time.Since(start)).String()
-			gist.Files[github.GistFilename(r.name)] = github.GistFile{Content: &r.content}
-			gist.Description = github.String(fmt.Sprintf("%s for %s%s", w.name, j, suffix))
+			gist.Description = github.String(gistDesc + suffix)
 			status.Description = github.String(statusDesc + suffix)
 
 			// On first failure, do not wait.
