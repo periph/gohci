@@ -276,15 +276,21 @@ func validateArgs(values url.Values) (string, []string, error) {
 		return "", nil, fmt.Errorf("invalid altPath %q: unexpected url format", altPath)
 	}
 	var superUsers []string
-	if s := values.Get("superUsers"); s != "" {
-		superUsers = strings.Split(s, ",")
-		for _, s := range superUsers {
-			// For https://github.com/join:
+	for _, v := range values["superUsers"] {
+		for _, s := range strings.Split(v, ",") {
+			if len(s) == 0 {
+				return "", nil, fmt.Errorf("passing an empty superUser")
+			}
+			// From https://github.com/join:
 			// "Username may only contain alphanumeric characters or single hyphens,
 			// and cannot begin or end with a hyphen"
-			if !isSubset(s, "abcdefghijklmnopqrstuvwxyz012345678-") {
-				return "", nil, fmt.Errorf("invalid superUser: %q", s)
+			if !isSubset(s, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-") {
+				return "", nil, fmt.Errorf("superUser contains unexpected characters: %q", s)
 			}
+			if strings.HasPrefix(s, "-") || strings.HasSuffix(s, "-") {
+				return "", nil, fmt.Errorf("superUser starts or ends with a dash: %q", s)
+			}
+			superUsers = append(superUsers, s)
 		}
 	}
 	return altPath, superUsers, nil
