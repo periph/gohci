@@ -1,8 +1,41 @@
+# Copyright 2019 The Periph Authors. All rights reserved.
+# Use of this source code is governed under the Apache License, Version 2.0
+# that can be found in the LICENSE file.
+
 language: go
 sudo: false
+dist: xenial
 go_import_path: periph.io/x/gohci
-go:
-  - 1.x
+
+matrix:
+  include:
+  - go: 1.12.x
+    env: GO111MODULE=on
+    cache:
+      directories:
+        # go1.10+ 'go test' cache on linux (macOS and Windows are # different).
+        - $HOME/.cache/go-build
+        # go1.11+ with GO111MODULE=on
+        - $GOPATH/pkg/mod
+        # Cache tools sources. Manually verified that both misspell and ineffassign
+        # only depend on the stdlib.
+        - $GOPATH/src/github\.com
+        # For shadow.
+        - $GOPATH/src/golang\.org
+
+before_script:
+  - echo $TRAVIS_GO_VERSION
+  - go get -v periph.io/x/gohci/...
+  - go get -u -v github.com/client9/misspell/cmd/misspell github.com/gordonklaus/ineffassign golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
 
 script:
-  - go test ./...
+  # TODO(maruel): Enable back once vendored code is removed.
+  #- echo 'Check Code is well formatted'; ! gofmt -s -d . | read
+  - echo 'Erroring on misspelling'; ! misspell . | grep a
+  - ineffassign .
+  - go vet -vettool=$GOPATH/bin/shadow ./...
+  - bash -c 'set -e; echo "" > coverage.txt; for d in $(go list ./...); do go test -covermode=count -coverprofile=p.out $d; if [ -f p.out ]; then cat p.out >> coverage.txt; rm p.out; fi; done'
+  - go test -race ./...
+
+after_success:
+  - bash <(curl -s https://codecov.io/bash)

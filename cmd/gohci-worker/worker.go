@@ -164,7 +164,7 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 	// The function exits once results is closed by the goroutine below.
 	w.wg.Add(1)
 	defer w.wg.Done()
-	start := time.Now()
+	start1 := time.Now()
 	results := make(chan gistFile, 16)
 	type up struct {
 		checks []gohci.Check
@@ -175,23 +175,22 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 		defer close(results)
 
 		// Phase 1: parallel sync.
-		start := time.Now()
+		start2 := time.Now()
 		content, ok := j.sync()
-		results <- gistFile{"setup-1-sync", content, ok, time.Since(start)}
+		results <- gistFile{"setup-1-sync", content, ok, time.Since(start2)}
 		if !ok {
 			return
 		}
 
 		// Phase 2: checkout.
-		start = time.Now()
+		start2 = time.Now()
 		content, ok = j.checkout()
-		results <- gistFile{"setup-2-get", content, ok, time.Since(start)}
+		results <- gistFile{"setup-2-get", content, ok, time.Since(start2)}
 		if !ok {
 			return
 		}
 
 		// Phase 3: parse config.
-		start = time.Now()
 		chks, note := j.parseConfig(w.name)
 		cc <- up{chks, note}
 
@@ -273,7 +272,7 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 				suffix += " FAILED"
 			}
 			// Always add duration up to now.
-			suffix += " in " + roundDuration(time.Since(start)).String()
+			suffix += " in " + roundDuration(time.Since(start1)).String()
 			gist.Description = github.String(gistDesc + suffix)
 			status.Description = github.String(statusDesc + suffix)
 
