@@ -2,40 +2,68 @@
 # Use of this source code is governed under the Apache License, Version 2.0
 # that can be found in the LICENSE file.
 
+os: linux
+dist: bionic
 language: go
-sudo: false
-dist: xenial
 go_import_path: periph.io/x/gohci
 
-matrix:
+jobs:
   include:
-  - go: 1.12.x
-    env: GO111MODULE=on
+  - go: 1.14.x
     cache:
       directories:
-        # go1.10+ 'go test' cache on linux (macOS and Windows are # different).
-        - $HOME/.cache/go-build
-        # go1.11+ with GO111MODULE=on
-        - $GOPATH/pkg/mod
-        # Cache tools sources. Manually verified that both misspell and ineffassign
-        # only depend on the stdlib.
-        - $GOPATH/src/github\.com
-        # For shadow.
-        - $GOPATH/src/golang\.org
+      - $GOPATH/pkg/mod
+      # Cache tools sources.
+      #- $GOPATH/src/github\.com/client9
+      #- $GOPATH/src/github\.com/google/addlicense
+      #- $GOPATH/src/github\.com/gordonklaus
+      #- $GOPATH/src/golang\.org
+    before_script:
+    - echo $TRAVIS_GO_VERSION
+    - go get -t -v periph.io/x/periph/...
+    - >
+      go get -u -v
+      github.com/client9/misspell/cmd/misspell
+      github.com/google/addlicense
+      github.com/gordonklaus/ineffassign
+      golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
+    script:
+    # TODO(maruel): Add back once vendor/ is removed:
+    #- >
+    #  echo 'Check Code is well formatted';
+    #  ! gofmt -s -d . | read
+    - >
+      echo 'Erroring on misspelling';
+      ! misspell . | grep a
+    - >
+      echo 'Erroring on inefficient variable assignment:';
+      ineffassign .
+    - >
+      echo 'Erroring on go vet:';
+      go vet ./...
+    - >
+      echo 'Erroring on shadowed variables:';
+      ! go vet -vettool=$(which shadow) ./... |& grep -v '"err"' | grep -e '^[^#]'
+    - >
+      echo 'Running tests with code coverage:';
+      go test -covermode=count -coverprofile=coverage.txt ./...
+    - >
+      echo 'Running tests with race detector:';
+      go test -race ./...
+    # TODO(maruel): Trim executables. Simplify ./vendor once removed.
+    - >
+      echo 'Erroring if an executable was committed:';
+      if find . -path ./update_vendor.sh -prune -o -path ./systemd/setup.sh -prune -o -path ./.git -prune -o -path ./vendor -prune -o -type f -executable -print | grep -e . ; then echo 'Do not commit executables'; false; fi
+    # TODO(maruel): Simplify ./vendor once removed.
+    - >
+      echo 'Erroring if a license header is missing:';
+      ! addlicense -check addlicense . | grep -v '^vendor/' | read
+    after_success:
+    - bash <(curl -s https://codecov.io/bash)
 
-before_script:
-  - echo $TRAVIS_GO_VERSION
-  - go get -v periph.io/x/gohci/...
-  - go get -u -v github.com/client9/misspell/cmd/misspell github.com/gordonklaus/ineffassign golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
-
-script:
-  # TODO(maruel): Enable back once vendored code is removed.
-  #- echo 'Check Code is well formatted'; ! gofmt -s -d . | read
-  - echo 'Erroring on misspelling'; ! misspell . | grep a
-  - ineffassign .
-  - go vet -vettool=$GOPATH/bin/shadow ./...
-  - bash -c 'set -e; echo "" > coverage.txt; for d in $(go list ./...); do go test -covermode=count -coverprofile=p.out $d; if [ -f p.out ]; then cat p.out >> coverage.txt; rm p.out; fi; done'
-  - go test -race ./...
-
-after_success:
-  - bash <(curl -s https://codecov.io/bash)
+  - go: 1.9.7
+    before_script:
+    - echo $TRAVIS_GO_VERSION
+    - go get -t -v periph.io/x/periph/...
+    script:
+    - go test ./...
