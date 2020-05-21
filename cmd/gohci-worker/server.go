@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/github"
+	"github.com/google/go-github/v31/github"
 	fsnotify "gopkg.in/fsnotify.v1"
-	"periph.io/x/gohci"
+	"periph.io/x/gohci/v0"
 )
 
 // runServer runs the web server.

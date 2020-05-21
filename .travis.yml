@@ -20,7 +20,7 @@ jobs:
       #- $GOPATH/src/golang\.org
     before_script:
     - echo $TRAVIS_GO_VERSION
-    - go get -t -v periph.io/x/periph/...
+    - go get -t -v periph.io/x/gohci/...
     - >
       go get -u -v
       github.com/client9/misspell/cmd/misspell
@@ -28,10 +28,9 @@ jobs:
       github.com/gordonklaus/ineffassign
       golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
     script:
-    # TODO(maruel): Add back once vendor/ is removed:
-    #- >
-    #  echo 'Check Code is well formatted';
-    #  ! gofmt -s -d . | read
+    - >
+      echo 'Check Code is well formatted';
+      ! gofmt -s -d . | read
     - >
       echo 'Erroring on misspelling';
       ! misspell . | grep a
@@ -53,17 +52,9 @@ jobs:
     # TODO(maruel): Trim executables. Simplify ./vendor once removed.
     - >
       echo 'Erroring if an executable was committed:';
-      if find . -path ./update_vendor.sh -prune -o -path ./systemd/setup.sh -prune -o -path ./.git -prune -o -path ./vendor -prune -o -type f -executable -print | grep -e . ; then echo 'Do not commit executables'; false; fi
-    # TODO(maruel): Simplify ./vendor once removed.
+      if find . -path ./systemd/setup.sh -prune -o -path ./.git -prune -o -type f -executable -print | grep -e . ; then echo 'Do not commit executables'; false; fi
     - >
       echo 'Erroring if a license header is missing:';
-      ! addlicense -check addlicense . | grep -v '^vendor/' | read
+      ! addlicense -check addlicense . | read
     after_success:
     - bash <(curl -s https://codecov.io/bash)
-
-  - go: 1.9.7
-    before_script:
-    - echo $TRAVIS_GO_VERSION
-    - go get -t -v periph.io/x/periph/...
-    script:
-    - go test ./...

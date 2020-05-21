@@ -13,8 +13,8 @@ import (
 	"os"
 	"runtime"
 
-	yaml "gopkg.in/yaml.v2"
-	"periph.io/x/gohci"
+	yaml "gopkg.in/yaml.v3"
+	"periph.io/x/gohci/v0"
 )
 
 // loadConfig loads the current config or returns the default one.
