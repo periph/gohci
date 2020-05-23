@@ -25,7 +25,6 @@ jobs:
       go get -u -v
       github.com/client9/misspell/cmd/misspell
       github.com/google/addlicense
-      github.com/gordonklaus/ineffassign
       golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
     script:
     - >
@@ -35,26 +34,8 @@ jobs:
       echo 'Erroring on misspelling';
       ! misspell . | grep a
     - >
-      echo 'Erroring on inefficient variable assignment:';
-      ineffassign .
-    - >
-      echo 'Erroring on go vet:';
-      go vet ./...
-    - >
       echo 'Erroring on shadowed variables:';
       ! go vet -vettool=$(which shadow) ./... |& grep -v '"err"' | grep -e '^[^#]'
     - >
-      echo 'Running tests with code coverage:';
-      go test -covermode=count -coverprofile=coverage.txt ./...
-    - >
-      echo 'Running tests with race detector:';
-      go test -race ./...
-    # TODO(maruel): Trim executables. Simplify ./vendor once removed.
-    - >
-      echo 'Erroring if an executable was committed:';
-      if find . -path ./systemd/setup.sh -prune -o -path ./.git -prune -o -type f -executable -print | grep -e . ; then echo 'Do not commit executables'; false; fi
-    - >
       echo 'Erroring if a license header is missing:';
       ! addlicense -check addlicense . | read
-    after_success:
-    - bash <(curl -s https://codecov.io/bash)

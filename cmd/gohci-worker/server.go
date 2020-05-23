@@ -52,7 +52,7 @@ func runServer(c *gohci.WorkerConfig, wkr worker, fileName string) error {
 		log.Printf("Failed to initialize watcher: %v", err)
 	}
 
-	SetConsoleTitle(fmt.Sprintf("gohci - %s", a))
+	_ = SetConsoleTitle(fmt.Sprintf("gohci - %s", a))
 	if err == nil {
 		select {
 		case <-w.Events:

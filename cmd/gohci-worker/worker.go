@@ -39,7 +39,7 @@ type workerQueue struct {
 }
 
 func newWorkerQueue(name, wd string, accessToken string) worker {
-	tc := oauth2.NewClient(oauth2.NoContext, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken}))
+	tc := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken}))
 	return &workerQueue{
 		name:   name,
 		ctx:    context.Background(),
