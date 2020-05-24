@@ -98,7 +98,7 @@ jobs:
       run: ineffassign .
     - name: 'Check: staticcheck'
       if: always()
-      run: staticcheck -checks -U1000 ./...
+      run: staticcheck -checks all,-U1000 ./...
 
       # The following checks are not dependent on the OS or go build tags. Only
       # run them on ubuntu-latest since it's the fastest one.

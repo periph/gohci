@@ -20,6 +20,10 @@ func SetConsoleTitle(title string) error {
 	if err != nil {
 		return err
 	}
-	_, _, errno := syscall.Syscall(p, 1, uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr(title))), 0, 0)
+	s, err := syscall.UTF16PtrFromString(title)
+	if err != nil {
+		return err
+	}
+	_, _, errno := syscall.Syscall(p, 1, uintptr(unsafe.Pointer(s)), 0, 0)
 	return syscall.Errno(errno)
 }
