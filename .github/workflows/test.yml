@@ -117,7 +117,7 @@ jobs:
         fi
     - name: 'Check: addlicense; all sources have a license header (ubuntu)'
       if: matrix.os == 'ubuntu-latest'
-      run: addlicense -check addlicense .
+      run: addlicense -check .
     - name: "Check: misspelling; code doesn't contain misspelling (ubuntu)"
       if: matrix.os == 'ubuntu-latest'
       run: |

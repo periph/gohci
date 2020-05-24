@@ -18,12 +18,8 @@ jobs:
     - go get -t -v periph.io/x/gohci/...
     - >
       go get -u -v
-      github.com/google/addlicense
       golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
     script:
     - >
       echo 'Erroring on shadowed variables:';
       ! go vet -vettool=$(which shadow) ./... |& grep -v '"err"' | grep -e '^[^#]'
-    - >
-      echo 'Erroring if a license header is missing:';
-      ! addlicense -check addlicense . | read
