@@ -38,6 +38,17 @@ jobs:
         # active development. Shrug.
         key: "${{runner.os}}-gopkg-${{hashFiles('**/go.sum')}}"
         restore-keys: "${{runner.os}}-gopkg-"
+    - name: "Check: go generate doesn't modify files (posix)"
+      # TODO(maruel): Find a way to enable this check on Windows.
+      if: matrix.os != 'windows-latest'
+      run: |
+        go generate ./...
+        TOUCHED=$(git status --porcelain --ignored)
+        if ! test -z "$TOUCHED"; then
+          echo "go generate modified these files, please update:"
+          echo "$TOUCHED"
+          false
+        fi
     - name: 'go get necessary tools'
       run: >
         go get -u
