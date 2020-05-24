@@ -13,23 +13,14 @@ jobs:
     cache:
       directories:
       - $GOPATH/pkg/mod
-      # Cache tools sources.
-      #- $GOPATH/src/github\.com/client9
-      #- $GOPATH/src/github\.com/google/addlicense
-      #- $GOPATH/src/github\.com/gordonklaus
-      #- $GOPATH/src/golang\.org
     before_script:
     - echo $TRAVIS_GO_VERSION
     - go get -t -v periph.io/x/gohci/...
     - >
       go get -u -v
-      github.com/client9/misspell/cmd/misspell
       github.com/google/addlicense
       golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
     script:
-    - >
-      echo 'Erroring on misspelling';
-      ! misspell . | grep a
     - >
       echo 'Erroring on shadowed variables:';
       ! go vet -vettool=$(which shadow) ./... |& grep -v '"err"' | grep -e '^[^#]'
