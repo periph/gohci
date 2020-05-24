@@ -13,7 +13,9 @@ on: [push, pull_request]
 name: Run tests
 jobs:
   test_all:
+    continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         gover: ['1.14.3']
@@ -78,11 +80,11 @@ jobs:
         dir /a %USERPROFILE%\go\bin
     - name: 'Check: go vet'
       run: go vet ./...
-    - name: 'Check: shadowed variables (posix)'
+    - name: 'Check: go vet shadow; shadowed variables (posix)'
       if: matrix.os != 'windows-latest'
       run: go vet -vettool=$(which shadow) ./...
       #  |& grep -v '"err"' | grep -e '^[^#]'
-    - name: 'Check: shadowed variables (windows)'
+    - name: 'Check: go vet shadow; shadowed variables (windows)'
       if: matrix.os == 'windows-latest'
       shell: cmd
       run: go vet -vettool=%USERPROFILE%/go/bin/shadow.exe ./...
@@ -104,13 +106,19 @@ jobs:
     - name: 'Check: no executable was committed (ubuntu)'
       if: matrix.os == 'ubuntu-latest'
       run: if find . -path ./systemd/setup.sh -prune -o -path ./.git -prune -o -type f -executable -print | grep -e . ; then echo 'Do not commit executables'; false; fi
-    - name: 'Check: Code is well formatted (ubuntu)'
+    - name: 'Check: gofmt; code is well formatted (ubuntu)'
       if: matrix.os == 'ubuntu-latest'
-      run: gofmt -s -d .
-    - name: 'Check: all sources have a license header (ubuntu)'
+      run: |
+        DIFF=$(sh -c "gofmt -s ." 2>&1)
+        DIFF="$(gofmt -s -d .)"
+        if ! test -z "$DIFF"; then
+          echo "$DIFF"
+          false
+        fi
+    - name: 'Check: addlicense; all sources have a license header (ubuntu)'
       if: matrix.os == 'ubuntu-latest'
       run: addlicense -check addlicense .
-    - name: "Check: Code doesn't contain misspelling (ubuntu)"
+    - name: "Check: misspelling; code doesn't contain misspelling (ubuntu)"
       if: matrix.os == 'ubuntu-latest'
       run: misspell .
       #| grep a

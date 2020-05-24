@@ -28,9 +28,6 @@ jobs:
       golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
     script:
     - >
-      echo 'Check Code is well formatted';
-      ! gofmt -s -d . | read
-    - >
       echo 'Erroring on misspelling';
       ! misspell . | grep a
     - >
