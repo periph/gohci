@@ -27,28 +27,15 @@ jobs:
     - uses: actions/setup-go@v2
       with:
         go-version: "^${{matrix.gover}}"
-    - uses: actions/checkout@v2
     - name: 'Cache: ~/go/pkg/mod'
       uses: actions/cache@v1
       with:
         path: "~/go/pkg/mod"
-        # TODO(maruel): The key is wrong, as we also want to update the cache
-        # when the fetched tools are updated. The problem is that packages
-        # golang.org/x/... are always new since they are not versioned but under
-        # active development. Shrug.
-        key: "${{runner.os}}-gopkg-${{hashFiles('**/go.sum')}}"
+        # We want a key that helps with keeping the tools.
+        key: "${{runner.os}}-gopkg-${{hashFiles('~/go/pkg/**/go.sum')}}"
         restore-keys: "${{runner.os}}-gopkg-"
-    - name: "Check: go generate doesn't modify files (posix)"
-      # TODO(maruel): Find a way to enable this check on Windows.
-      if: matrix.os != 'windows-latest'
-      run: |
-        go generate ./...
-        TOUCHED=$(git status --porcelain --ignored)
-        if ! test -z "$TOUCHED"; then
-          echo "go generate modified these files, please update:"
-          echo "$TOUCHED"
-          false
-        fi
+
+      # Fetch the tools before checking out, so they don't modify go.mod/go.sum.
     - name: 'go get necessary tools'
       run: >
         go get -u
@@ -56,6 +43,15 @@ jobs:
         golang.org/x/lint/golint
         golang.org/x/tools/go/analysis/passes/shadow/cmd/shadow
         honnef.co/go/tools/cmd/staticcheck
+    - name: 'go get necessary tools (ubuntu)'
+      if: always() && matrix.os == 'ubuntu-latest'
+      run: >
+        go get -u
+        github.com/client9/misspell/cmd/misspell
+        github.com/google/addlicense
+
+      # Checkout and print debugging information.
+    - uses: actions/checkout@v2
     - name: "Debug (posix)"
       if: always() && matrix.os != 'windows-latest'
       run: |
@@ -91,6 +87,8 @@ jobs:
         dir /a %USERPROFILE%
         dir /a %USERPROFILE%\go
         dir /a %USERPROFILE%\go\bin
+
+      # Now run proper checks.
     - name: 'Check: go vet'
       if: always()
       run: go vet ./...
@@ -113,12 +111,6 @@ jobs:
 
       # The following checks are not dependent on the OS or go build tags. Only
       # run them on ubuntu-latest since it's the fastest one.
-    - name: 'go get necessary tools (ubuntu)'
-      if: always() && matrix.os == 'ubuntu-latest'
-      run: >
-        go get -u
-        github.com/client9/misspell/cmd/misspell
-        github.com/google/addlicense
     - name: 'Check: no executable was committed (ubuntu)'
       if: always() && matrix.os == 'ubuntu-latest'
       run: |
@@ -170,9 +162,24 @@ jobs:
       run: go test -covermode=count -coverprofile=coverage.txt ./...
       # Don't send code coverage if anything failed to reduce spam.
     - uses: codecov/codecov-action@v1
+    - name: 'Cleanup'
+      run: rm coverage.txt
       # Don't run go test -race if anything failed, to speed up the results.
     - name: 'Check: go test -race'
       run: go test -race ./...
+
+    - name: "Check: go generate doesn't modify files (posix)"
+      # TODO(maruel): Find a way to enable this check on Windows.
+      if: matrix.os != 'windows-latest'
+      run: |
+        go generate ./...
+        TOUCHED=$(git status --porcelain --ignored)
+        if ! test -z "$TOUCHED"; then
+          echo "go generate modified these files, please update:"
+          echo "$TOUCHED"
+          git diff
+          false
+        fi
 
     - name: 'Send comments (posix)'
       if: failure() && matrix.os != 'windows-latest' && github.event_name == 'pull_request'
