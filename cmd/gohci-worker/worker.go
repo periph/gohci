@@ -136,26 +136,6 @@ func (w *workerQueue) runJobRequest(j *jobRequest, gist *github.Gist, status *gi
 	log.Printf("- testing done: https://github.com/%s/commit/%s", j.getID(), j.commitHash[:12])
 }
 
-// createIssue creates a github issue for the job failure.
-//
-// blame must be a list of github handles. These strings are different from what
-// appears in the git commit log. Non-team members cannot be assigned an issue,
-// in this case the API will silently drop them.
-func (w *workerQueue) createIssue(j *jobRequest, gist *github.Gist, blame []string, title string) {
-	// https://developer.github.com/v3/issues/#create-an-issue
-	issue := github.IssueRequest{
-		Title: &title,
-		// TODO(maruel): Add more than just the URL but that's a start.
-		Body:      gist.HTMLURL,
-		Assignees: &blame,
-	}
-	if issue, _, err := w.client.Issues.Create(w.ctx, j.org, j.repo, &issue); err != nil {
-		log.Printf("- failed to create issue: %v", err)
-	} else {
-		log.Printf("- created issue #%d", *issue.ID)
-	}
-}
-
 // runJobRequestInner is the inner loop of runJobRequest. It updates gist as the
 // checks are progressing.
 //

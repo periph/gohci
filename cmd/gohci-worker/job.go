@@ -117,8 +117,6 @@ type jobRequest struct {
 	gopath string   // Cache of GOPATH
 	path   string   // Cache of PATH
 	env    []string // Precomputed environment variables
-
-	checks []gohci.Check // Commands to run to test the repository. They are run one after the other from the repository's root.
 }
 
 // newJobRequest creates a new test request for project 'org/repo' on commitHash
