@@ -36,7 +36,7 @@ func runServer(c *gohci.WorkerConfig, wkr worker, fileName string) error {
 		return err
 	}
 	a := ln.Addr().String()
-	ln.Close()
+	_ = ln.Close()
 	log.Printf("Listening on: %s", a)
 
 	s := &server{c: c, w: wkr, start: time.Now()}
@@ -95,7 +95,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == "GET" {
 		// Return the uptime. This is a small enough information leak.
-		io.WriteString(w, time.Since(s.start).String())
+		_, _ = io.WriteString(w, time.Since(s.start).String())
 		return
 	}
 	if r.Method != "POST" {
@@ -117,7 +117,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.handleHook(github.WebHookType(r), payload, altPath, superUsers)
-	io.WriteString(w, "{}")
+	_, _ = io.WriteString(w, "{}")
 }
 
 // handleHook handles a validated github webhook.

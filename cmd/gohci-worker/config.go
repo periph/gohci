@@ -31,7 +31,7 @@ func loadConfig(fileName string) (*gohci.WorkerConfig, error) {
 		return nil, rewrite(fileName, c)
 	}
 	if err = yaml.Unmarshal(b, c); err != nil {
-		rewrite(fileName, c)
+		_ = rewrite(fileName, c)
 		return nil, err
 	}
 	if c.Name == "" || c.WebHookSecret == "" {

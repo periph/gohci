@@ -83,9 +83,11 @@ func getCmd(path string, cmd []string) *exec.Cmd {
 	defer muCmd.Unlock()
 	if path != "" {
 		oldpath := os.Getenv("PATH")
-		os.Setenv("PATH", path)
+		_ = os.Setenv("PATH", path)
 		// Restore PATH.
-		defer func() { os.Setenv("PATH", oldpath) }()
+		defer func() {
+			_ = os.Setenv("PATH", oldpath)
+		}()
 	}
 	return exec.Command(cmd[0], cmd[1:]...)
 }
