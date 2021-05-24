@@ -182,7 +182,7 @@ func (j *jobRequest) getID() string {
 	return j.org + "/" + j.repo
 }
 
-// findCommitHash tries to get the HEAD commit for the PR # or master branch.
+// findCommitHash tries to get the HEAD commit for the PR # or default branch.
 func (j *jobRequest) findCommitHash() bool {
 	if err := j.assertDir(); err != nil {
 		return false
@@ -192,7 +192,7 @@ func (j *jobRequest) findCommitHash() bool {
 		log.Printf("  git ls-remote failed:\n%s", stdout)
 		return false
 	}
-	p := "refs/heads/master"
+	p := "HEAD"
 	if j.pullID != 0 {
 		p = fmt.Sprintf("refs/pull/%d/head", j.pullID)
 	}
@@ -266,7 +266,7 @@ func (j *jobRequest) run(relwd string, env []string, cmd []string, pathOverride 
 }
 
 // fetchRepo tries to fetch a repository if possible and checks out
-// origin/master as master.
+// origin/HEAD as main.
 //
 // If the fetch failed, it deletes the checkout.
 func (j *jobRequest) fetchRepo(repoRel string) (string, bool) {
@@ -281,7 +281,7 @@ func (j *jobRequest) fetchRepo(repoRel string) (string, bool) {
 		}
 		return stdout + "<recovered failure>\nrm -rf " + repoPath + "\n", true
 	}
-	stdout2, ok2 := j.run(repoRel, nil, []string{"git", "checkout", "--quiet", "-B", "master", "origin/master"}, false)
+	stdout2, ok2 := j.run(repoRel, nil, []string{"git", "checkout", "--quiet", "-B", "main", "origin/HEAD"}, false)
 	return stdout + stdout2, ok && ok2
 }
 
