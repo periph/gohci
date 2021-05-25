@@ -39,6 +39,7 @@ type WorkerConfig struct {
 type Check struct {
 	Cmd []string // Command to run.
 	Env []string // Optional environment variables to use.
+	Dir string   // Directory to run from. Defaults to the root of the checkout.
 }
 
 // ProjectWorkerConfig is the project configuration via ".gohci.yml" for a
