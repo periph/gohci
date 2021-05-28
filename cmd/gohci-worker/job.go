@@ -140,6 +140,9 @@ func newJobRequest(org, repo, altPath, commitHash string, useSSH bool, pullID in
 	// local GOPATH. This is safer as this doesn't modify the host environment.
 	env = append(env, "GOPATH="+gopath)
 	env = append(env, "PATH="+path)
+	if commitHash != "" {
+		env = append(env, "GIT_SHA="+commitHash)
+	}
 
 	return &jobRequest{
 		org:        org,
@@ -223,29 +226,47 @@ func (j *jobRequest) metadata() string {
 // run runs an executable and returns mangled merged stdout+stderr.
 //
 // Use pathOverride when running checks.
-func (j *jobRequest) run(relwd string, env []string, cmd []string, pathOverride bool) (string, bool) {
-	cmds := strings.Join(env, " ")
-	if len(cmds) != 0 {
-		cmds += " "
+func (j *jobRequest) run(relwd string, env, cmd []string, pathOverride bool) (string, bool) {
+	// Keep a copy of the one off environment variables, as we'll print them
+	// later.
+	dbg := strings.Join(env, " ")
+
+	// Setup the environment variables.
+	if len(env) != 0 {
+		// TODO(maruel): Remove previous existing definition.
+		env = append(append([]string(nil), j.env...), env...)
+	} else {
+		env = j.env
 	}
-	cmds += strings.Join(cmd, " ")
-	log.Printf("- relwd=%s : %s", relwd, cmds)
+
+	// Evaluate environment variables.
+	cmd = append([]string(nil), cmd...)
+	for i := range cmd {
+		cmd[i] = os.Expand(cmd[i], func(key string) string {
+			key += "="
+			for _, e := range env {
+				if strings.HasPrefix(key, e) {
+					return e[len(key):]
+				}
+			}
+			return ""
+		})
+	}
+	// Log the final command.
+	if len(dbg) != 0 {
+		dbg += " "
+	}
+	dbg += strings.Join(cmd, " ")
+	log.Printf("- relwd=%s : %s", relwd, dbg)
+
 	var c *exec.Cmd
 	if pathOverride {
 		c = getCmd(j.path, cmd)
 	} else {
 		c = getCmd("", cmd)
 	}
+	c.Env = env
 	c.Dir = filepath.Join(j.gopath, "src", relwd)
-	// Setup the environment variables.
-	if len(env) != 0 {
-		c.Env = make([]string, 0, len(j.env)+len(env))
-		// TODO(maruel): Remove previous existing definition.
-		c.Env = append(c.Env, env...)
-		c.Env = append(c.Env, j.env...)
-	} else {
-		c.Env = j.env
-	}
 	start := time.Now()
 	out, err := c.CombinedOutput()
 	duration := time.Since(start)
@@ -262,7 +283,7 @@ func (j *jobRequest) run(relwd string, env []string, cmd []string, pathOverride 
 		}
 	}
 	return fmt.Sprintf("%s $ %s  (exit:%d in %s)\n%s",
-		filepath.Join("$GOPATH/src", relwd), cmds, exit, roundDuration(duration), normalizeUTF8(out)), err == nil
+		filepath.Join("$GOPATH/src", relwd), dbg, exit, roundDuration(duration), normalizeUTF8(out)), err == nil
 }
 
 // fetchRepo tries to fetch a repository if possible and checks out
@@ -466,7 +487,13 @@ func (j *jobRequest) runChecks(checks []gohci.Check, results chan<- gistFile) bo
 	nb := len(strconv.Itoa(len(checks)))
 	for i, c := range checks {
 		start := time.Now()
-		stdout, ok2 := j.run(j.getPath(), c.Env, c.Cmd, true)
+		d := j.getPath()
+		if c.Dir != "" {
+			// TODO(maruel): Make sure it's still within the workspace. Including
+			// symlinks. That said we can't do miracles without a proper namespace.
+			d = filepath.Join(d, c.Dir)
+		}
+		stdout, ok2 := j.run(d, c.Env, c.Cmd, true)
 		results <- gistFile{fmt.Sprintf("cmd%0*d", nb, i+1), stdout, ok2, time.Since(start)}
 		// Still run the other tests.
 		ok = ok && ok2

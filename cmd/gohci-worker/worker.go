@@ -172,6 +172,7 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 
 		// Phase 3: parse config.
 		chks, note := j.parseConfig(w.name)
+		// TODO(maruel): Validate!
 		cc <- up{chks, note}
 
 		// Phase 4: checks.
