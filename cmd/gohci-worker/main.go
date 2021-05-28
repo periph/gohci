@@ -68,6 +68,7 @@ func mainImpl() error {
 	if err != nil {
 		return err
 	}
+	log.Printf("Built with %s", runtime.Version())
 	log.Printf("Config: %#v", c)
 	wd, err := os.Getwd()
 	if err != nil {

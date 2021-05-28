@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"reflect"
+	"runtime"
 	"strings"
 	"time"
 
@@ -94,8 +95,11 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == "GET" {
-		// Return the uptime. This is a small enough information leak.
+		// Return the uptime and Go version. This is a small enough information leak.
+		w.Header().Add("Content-Type", "text/plain")
 		_, _ = io.WriteString(w, time.Since(s.start).String())
+		_, _ = io.WriteString(w, "\n")
+		_, _ = io.WriteString(w, runtime.Version())
 		return
 	}
 	if r.Method != "POST" {
@@ -117,6 +121,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.handleHook(github.WebHookType(r), payload, altPath, superUsers)
+	w.Header().Add("Content-Type", "application/json")
 	_, _ = io.WriteString(w, "{}")
 }
 
