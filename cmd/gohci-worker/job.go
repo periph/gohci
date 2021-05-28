@@ -245,7 +245,7 @@ func (j *jobRequest) run(relwd string, env, cmd []string, pathOverride bool) (st
 		cmd[i] = os.Expand(cmd[i], func(key string) string {
 			key += "="
 			for _, e := range env {
-				if strings.HasPrefix(key, e) {
+				if strings.HasPrefix(e, key) {
 					return e[len(key):]
 				}
 			}
