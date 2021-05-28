@@ -97,7 +97,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
 		// Return the uptime and Go version. This is a small enough information leak.
 		w.Header().Add("Content-Type", "text/plain")
-		_, _ = io.WriteString(w, time.Since(s.start).String())
+		_, _ = io.WriteString(w, time.Since(s.start).Round(time.Second).String())
 		_, _ = io.WriteString(w, "\n")
 		_, _ = io.WriteString(w, runtime.Version())
 		return
