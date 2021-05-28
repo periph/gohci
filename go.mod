@@ -1,4 +1,4 @@
-module periph.io/x/gohci/v0
+module periph.io/x/gohci
 
 go 1.11
 
