@@ -11,11 +11,13 @@
 
 set -eu
 
+export GO111MODULE=on
+
 if (which gohci-worker >/dev/null); then
   echo Found gohci-worker
 else
   echo Fetching gohci-worker
-  go get periph.io/x/gohci/cmd/gohci-worker
+  go install periph.io/x/gohci/cmd/gohci-worker@latest
 fi
 
 mkdir -p /home/${USER}/gohci
@@ -51,8 +53,9 @@ User=${USER}
 Group=${USER}
 NoNewPrivileges=true
 # /bin/sh is necessary to load .profile to set $GOPATH:
-ExecStart=/bin/sh -l -c "go get -v -u periph.io/x/gohci/cmd/gohci-worker"
+ExecStart=/bin/sh -l -c "go install -v periph.io/x/gohci/cmd/gohci-worker@latest"
 Environment=PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=GO111MODULE=on
 EOF
 
 
