@@ -14,7 +14,7 @@
 // - runs a Go build and a list of user supplied commands
 //
 // - posts the stdout to a Github gist and updates the commit's status
-package main // import "periph.io/x/gohci/v0/cmd/gohci-worker"
+package main // import "periph.io/x/gohci/cmd/gohci-worker"
 
 import (
 	"errors"

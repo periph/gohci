@@ -19,7 +19,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/pbnjay/memory"
-	"periph.io/x/gohci/v0"
+	"periph.io/x/gohci"
 )
 
 // gohciBranch is a git branch name that doesn't have an high likelihood of

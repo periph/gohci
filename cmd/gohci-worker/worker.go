@@ -14,7 +14,7 @@ import (
 
 	"github.com/google/go-github/v31/github"
 	"golang.org/x/oauth2"
-	"periph.io/x/gohci/v0"
+	"periph.io/x/gohci"
 )
 
 // worker is the object that handles the queue of job requests.

@@ -19,7 +19,7 @@ import (
 
 	"github.com/google/go-github/v31/github"
 	fsnotify "gopkg.in/fsnotify.v1"
-	"periph.io/x/gohci/v0"
+	"periph.io/x/gohci"
 )
 
 // runServer runs the web server.
