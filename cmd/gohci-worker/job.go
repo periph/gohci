@@ -397,6 +397,8 @@ func (j *jobRequest) cleanup(name string, results chan<- gistFile) bool {
 			out += "Removed " + x + "\n"
 		}
 	}
-	results <- gistFile{name, out, ok, time.Since(start)}
+	if out != "" {
+		results <- gistFile{name, out, ok, time.Since(start)}
+	}
 	return ok
 }
