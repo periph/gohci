@@ -266,7 +266,7 @@ func (j *jobRequest) run(relwd string, env, cmd []string, pathOverride bool) (st
 		c = getCmd("", cmd)
 	}
 	c.Env = env
-	c.Dir = filepath.Join(j.gopath, "src", relwd)
+	c.Dir = filepath.Join(j.gopath, relwd)
 	start := time.Now()
 	out, err := c.CombinedOutput()
 	duration := time.Since(start)
@@ -286,52 +286,6 @@ func (j *jobRequest) run(relwd string, env, cmd []string, pathOverride bool) (st
 		filepath.Join("$GOPATH/src", relwd), dbg, exit, roundDuration(duration), normalizeUTF8(out)), err == nil
 }
 
-// fetchRepo tries to fetch a repository if possible and checks out
-// origin/HEAD as main.
-//
-// If the fetch failed, it deletes the checkout.
-func (j *jobRequest) fetchRepo(repoRel string) (string, bool) {
-	stdout, ok := j.run(repoRel, nil, []string{"git", "fetch", "--quiet", "--prune", "--all"}, false)
-	if !ok {
-		repoPath := filepath.Join(j.gopath, "src", repoRel)
-		// Give up and delete the repository. At worst "go get" will fetch
-		// it below.
-		if err := os.RemoveAll(repoPath); err != nil {
-			// Deletion failed, that's a hard failure.
-			return stdout + "<failure>\n" + err.Error() + "\n", false
-		}
-		return stdout + "<recovered failure>\nrm -rf " + repoPath + "\n", true
-	}
-	stdout2, ok2 := j.run(repoRel, nil, []string{"git", "checkout", "--quiet", "-B", "main", "origin/HEAD"}, false)
-	return stdout + stdout2, ok && ok2
-}
-
-// cloneOrFetch is meant to be used on the primary repository, making sure it
-// is checked out at the expected commit or Pull Request.
-func (j *jobRequest) cloneOrFetch(c chan<- setupWorkResult) {
-	p := filepath.Join(j.gopath, "src", j.getPath())
-	if _, err := os.Stat(p); err != nil && !os.IsNotExist(err) {
-		c <- setupWorkResult{"<failure>\n" + err.Error() + "\n", false}
-		return
-	} else if err != nil {
-		// Directory doesn't exist, need to clone.
-		stdout, ok := j.run(filepath.Dir(j.getPath()), nil, []string{"git", "clone", "--quiet", j.cloneURL()}, false)
-		c <- setupWorkResult{stdout, ok}
-		if j.pullID == 0 || !ok {
-			// For PRs, the commit has to be fetched manually.
-			return
-		}
-	}
-
-	// Directory exists, need to fetch.
-	args := []string{"git", "fetch", "--prune", "--quiet", "origin"}
-	if j.pullID != 0 {
-		args = append(args, fmt.Sprintf("pull/%d/head", j.pullID))
-	}
-	stdout, ok := j.run(j.getPath(), nil, args, false)
-	c <- setupWorkResult{stdout, ok}
-}
-
 func (j *jobRequest) assertDir() error {
 	repoPath := filepath.Join(j.gopath, "src", j.getPath())
 	up := filepath.Dir(repoPath)
@@ -343,68 +297,6 @@ func (j *jobRequest) assertDir() error {
 	return nil
 }
 
-// syncParallel checkouts out one repository if missing, and syncs all the
-// other git repositories found under the root directory concurrently.
-//
-// Since fetching is a remote operation with potentially low CPU and I/O,
-// reduce the total latency by doing all the fetches concurrently.
-//
-// The goal is to make "go get -t -d" as fast as possible, as all repositories
-// are already synced to HEAD.
-//
-// cloneURL is fetched into repoPath.
-func (j *jobRequest) syncParallel(c chan<- setupWorkResult) {
-	// git clone / go get will have a race condition if the directory doesn't
-	// exist.
-	root := filepath.Join(j.gopath, "src")
-	repoPath := filepath.Join(root, j.getPath())
-	if err := j.assertDir(); err != nil {
-		c <- setupWorkResult{"<failure>\n" + err.Error() + "\n", false}
-		return
-	}
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		j.cloneOrFetch(c)
-	}()
-
-	// Sync all the repositories concurrently.
-	err1 := filepath.Walk(root, func(path string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if path == repoPath {
-			// repoPath is handled specifically above.
-			return filepath.SkipDir
-		}
-		if fi.Name() == ".git" {
-			wg.Add(1)
-			go func(p string) {
-				defer wg.Done()
-				stdout, ok := j.fetchRepo(p)
-				c <- setupWorkResult{stdout, ok}
-			}(filepath.Dir(path)[len(root)+1:])
-			return filepath.SkipDir
-		}
-		return nil
-	})
-
-	// Remove $GOPATH/bin unconditionally. Otherwise a 'go install' may fail yet
-	// the execution afterwards 'succeeds' because a stale binary was left from a
-	// previous run.
-	if err2 := os.RemoveAll(filepath.Join(j.gopath, "bin")); err2 == nil {
-		c <- setupWorkResult{"Removed $GOPATH/bin\n", true}
-	} else {
-		c <- setupWorkResult{"Removed $GOPATH/bin:" + err2.Error() + "\n", false}
-	}
-
-	wg.Wait()
-	if err1 != nil {
-		c <- setupWorkResult{"<directory walking failure>\n" + err1.Error() + "\n", false}
-	}
-}
-
 // setupWorkResult is metadata to add to the 'setup' pseudo-steps.
 //
 // It is used to track the work as all repositories are pulled concurrently,
@@ -414,51 +306,37 @@ type setupWorkResult struct {
 	ok      bool
 }
 
-// sync is the first part of a job.
+// checkout is the first part of a job.
 //
-// It aggressively concurrently fetches all repositories in `gopath` to
-// accelerate the processing.
-func (j *jobRequest) sync() (string, bool) {
-	c := make(chan setupWorkResult)
-	go func() {
-		defer close(c)
-		j.syncParallel(c)
-	}()
-	out := ""
-	ok := true
-	for i := range c {
-		out += i.content
-		ok = ok && i.ok
-	}
-	return out, ok
-}
-
-// checkout is the second part of a job.
-//
-// It checkouts out the primary repository at the right commit and runs "go
-// get".
+// It checkouts out the primary repository at the right commit.
 func (j *jobRequest) checkout() (string, bool) {
-	// Second part: checkout the right commit, run go get.
+	sha := j.commitHash
+	if j.pullID != 0 {
+		sha = fmt.Sprintf("pull/%d/head", j.pullID)
+	}
+	p := filepath.Join("src", j.getPath())
+	if err := os.MkdirAll(filepath.Join(j.gopath, p), 0o700); err != nil {
+		return err.Error(), false
+	}
+	// There's a trick to checkout a single exact commit which works on older git
+	// clients.
 	setupCmds := [][]string{
-		// "go get" will try to pull and will complain if the checkout is not on a
-		// branch.
-		{"git", "checkout", "--quiet", "-B", gohciBranch, j.commitHash},
-		// "git pull --ff-only" will fail if there's no tracking branch, and
-		// it occasionally happen.
-		{"git", "checkout", "--quiet", "-B", gohciBranch + "2", gohciBranch},
-		// Pull add necessary dependencies.
-		{"go", "get", "-v", "-d", "-t", "./..."},
+		{"git", "init", "--quiet"},
+		{"git", "remote", "add", "origin", j.cloneURL()},
+		{"git", "fetch", "--quiet", "--depth", "1", "origin", sha},
+		{"git", "checkout", "--quiet", "FETCH_HEAD"},
 	}
 	out := ""
 	ok := true
 	for _, c := range setupCmds {
-		stdout, ok2 := j.run(j.getPath(), nil, c, false)
+		stdout, ok2 := j.run(p, nil, c, false)
 		out += stdout
 		if ok = ok && ok2; !ok {
 			break
 		}
 	}
 	return out, ok
+
 }
 
 // parseConfig is the third part of a job.
@@ -487,7 +365,7 @@ func (j *jobRequest) runChecks(checks []gohci.Check, results chan<- gistFile) bo
 	nb := len(strconv.Itoa(len(checks)))
 	for i, c := range checks {
 		start := time.Now()
-		d := j.getPath()
+		d := filepath.Join("src", j.getPath())
 		if c.Dir != "" {
 			// TODO(maruel): Make sure it's still within the workspace. Including
 			// symlinks. That said we can't do miracles without a proper namespace.
@@ -498,5 +376,27 @@ func (j *jobRequest) runChecks(checks []gohci.Check, results chan<- gistFile) bo
 		// Still run the other tests.
 		ok = ok && ok2
 	}
+	return ok
+}
+
+// cleanup is both the first and the last part of a job.
+func (j *jobRequest) cleanup(name string, results chan<- gistFile) bool {
+	start := time.Now()
+	out := ""
+	ok := true
+	for _, x := range []string{"bin", "src"} {
+		p := filepath.Join(j.gopath, x)
+		if _, err := os.Stat(p); os.IsNotExist(err) {
+			// Nothing was checked out, skip silently.
+			continue
+		}
+		if err := os.RemoveAll(p); err != nil {
+			out += err.Error() + "\n"
+			ok = false
+		} else {
+			out += "Removed " + x + "\n"
+		}
+	}
+	results <- gistFile{name, out, ok, time.Since(start)}
 	return ok
 }

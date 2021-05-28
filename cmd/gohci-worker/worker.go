@@ -147,36 +147,44 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 	start1 := time.Now()
 	results := make(chan gistFile, 16)
 	type up struct {
-		checks []gohci.Check
-		note   string
+		checks int
+		gist   gistFile
 	}
 	cc := make(chan up)
 	go func() {
 		defer close(results)
 
-		// Phase 1: parallel sync.
+		// Phase 0: cleanup.
+		// Just in case a previous run left junk around. It should normally be
+		// silent.
+		// TODO(maruel): Fix numbering.
+		j.cleanup("setup-0-precleanup", results)
+
+		// Phase 1: clone.
 		start2 := time.Now()
-		content, ok := j.sync()
-		results <- gistFile{"setup-1-sync", content, ok, time.Since(start2)}
+		content, ok := j.checkout()
+		results <- gistFile{"setup-1-clone", content, ok, time.Since(start2)}
 		if !ok {
+			// Still run cleanup.
+			j.cleanup("setup-3-post-cleanup", results)
 			return
 		}
 
-		// Phase 2: checkout.
-		start2 = time.Now()
-		content, ok = j.checkout()
-		results <- gistFile{"setup-2-get", content, ok, time.Since(start2)}
-		if !ok {
-			return
-		}
-
-		// Phase 3: parse config.
+		// Phase 2: parse config.
 		chks, note := j.parseConfig(w.name)
 		// TODO(maruel): Validate!
-		cc <- up{chks, note}
+		// Use a different channel to send this update to send also the number of
+		// checks.
+		cc <- up{
+			checks: len(chks),
+			gist:   gistFile{"setup-2-checks", note + "\nCommands to be run:\n" + cmds(chks), true, 0},
+		}
 
-		// Phase 4: checks.
+		// Phase 3: checks.
 		j.runChecks(chks, results)
+
+		// Phase 4: cleanup.
+		j.cleanup("setup-3-post-cleanup", results)
 	}()
 
 	// The check #0 is setup-3-checks.
@@ -196,8 +204,9 @@ func (w *workerQueue) runJobRequestInner(j *jobRequest, gist *github.Gist, statu
 			delay = nil
 
 		case c := <-cc:
-			total = len(c.checks)
-			results <- gistFile{"setup-3-checks", c.note + "\nCommands to be run:\n" + cmds(c.checks), true, 0}
+			// Similar to results but includes updating total.
+			total = c.checks
+			results <- c.gist
 
 		case r, ok := <-results:
 			if !ok {

@@ -1,6 +1,6 @@
 module periph.io/x/gohci
 
-go 1.11
+go 1.13
 
 require (
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
