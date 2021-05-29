@@ -22,10 +22,6 @@ import (
 	"periph.io/x/gohci"
 )
 
-// gohciBranch is a git branch name that doesn't have an high likelihood of
-// conflicting.
-const gohciBranch = "_gohci"
-
 var muCmd sync.Mutex
 
 // normalizeUTF8 returns valid UTF8 from potentially incorrectly encoded data
@@ -295,15 +291,6 @@ func (j *jobRequest) assertDir() error {
 		return err
 	}
 	return nil
-}
-
-// setupWorkResult is metadata to add to the 'setup' pseudo-steps.
-//
-// It is used to track the work as all repositories are pulled concurrently,
-// then used.
-type setupWorkResult struct {
-	content string
-	ok      bool
 }
 
 // checkout is the first part of a job.
