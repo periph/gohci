@@ -199,18 +199,13 @@ jobs:
             --data "${PAYLOAD}" "${URL}" > /dev/null
         fi
 
-    # Run on older Go versions while inside GOPATH, which tests different parts
-    # of the code. go modules will be used on 1.13 and later but not before.
   test_short:
-    env:
-      GOPATH: ${{github.workspace}}
-      GO111MODULE: auto
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        gover: ['1.13.15', '1.14.7']
+        gover: ['1.13.15']
     runs-on: "${{matrix.os}}"
     name: "go${{matrix.gover}} on ${{matrix.os}} (quick)"
     steps:
@@ -218,11 +213,5 @@ jobs:
       with:
         go-version: "${{matrix.gover}}"
     - uses: actions/checkout@v2
-      with:
-        path: src/periph.io/x/gohci
-    - name: 'Check: go get -d -t'
-      working-directory: src/periph.io/x/gohci
-      run: go get -d -t ./...
     - name: 'Check: go test'
-      working-directory: src/periph.io/x/gohci
       run: go test -timeout=40s ./...
