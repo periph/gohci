@@ -24,7 +24,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         # Do not forget to bump every 6 months!
-        gover: ["1.16"]
+        gover: ["1.17"]
     runs-on: "${{matrix.os}}"
     name: "go${{matrix.gover}}.x on ${{matrix.os}}"
     steps:
@@ -36,10 +36,6 @@ jobs:
     - name: Turn off git core.autocrlf
       run: git config --global core.autocrlf false
     - uses: actions/checkout@v2
-    - name: 'go version'
-      run: go version
-    - name: 'go env'
-      run: go env
     - name: "Debug"
       run: |
         echo HOME = $HOME
@@ -147,9 +143,11 @@ jobs:
       run: rm coverage.txt
       # Don't run go test -race if anything failed, to speed up the results.
     - name: 'Check: go test -race'
-      run: go test -timeout=40s -race ./...
+      run: go test -timeout=60s -race ./...
     - name: 'Check: go test -bench .'
       run: go test -timeout=40s -bench . -benchtime=100ms -cpu=1 ./...
+    - name: 'Check: CGO_ENABLED=0 go test -short'
+      run: CGO_ENABLED=0 go test -timeout=40s -short ./...
 
     - name: "Check: tree is clean"
       run: |
