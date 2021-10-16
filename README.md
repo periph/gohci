@@ -1,6 +1,7 @@
 # gohci - The Go on Hardware CI
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/periph/gohci)](https://goreportcard.com/report/github.com/periph/gohci)
+[![PkgGoDev](https://pkg.go.dev/badge/periph.io/x/gohci)](https://pkg.go.dev/periph.io/x/gohci)
+[![codecov](https://codecov.io/gh/periph/gohci/branch/main/graph/badge.svg?token=qfi4TTXMk7)](https://codecov.io/gh/periph/gohci)
 
 - This doc:
   - [Genesis](#genesis)
