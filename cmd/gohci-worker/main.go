@@ -84,7 +84,7 @@ func mainImpl() error {
 
 func main() {
 	if err := mainImpl(); err != nil {
-		fmt.Fprintf(os.Stderr, "gohci: %s.\n", err)
+		fmt.Fprintf(os.Stderr, "gohci-worker: %s.\n", err)
 		os.Exit(1)
 	}
 }
