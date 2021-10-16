@@ -330,6 +330,8 @@ func (j *jobRequest) checkout() (string, bool) {
 //
 // It reads the ".gohci.yml" if there's one.
 func (j *jobRequest) parseConfig(name string) ([]gohci.Check, string) {
+	// TODO(maruel): The function should return an error when the file exists but
+	// is malformed.
 	if p := loadProjectConfig(filepath.Join(j.gopath, "src", j.getPath(), ".gohci.yml")); p != nil {
 		for _, w := range p.Workers {
 			if w.Name == name {

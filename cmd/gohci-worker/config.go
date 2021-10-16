@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"runtime"
 
@@ -28,13 +29,16 @@ func loadConfig(fileName string) (*gohci.WorkerConfig, error) {
 	}
 	b, err := ioutil.ReadFile(fileName)
 	if err != nil {
+		log.Printf("Failed to read: %s", err)
 		return nil, rewrite(fileName, c)
 	}
 	if err = yaml.Unmarshal(b, c); err != nil {
+		log.Printf("Failed to decode %s: %s", fileName, err)
 		_ = rewrite(fileName, c)
 		return nil, err
 	}
 	if c.Name == "" || c.WebHookSecret == "" {
+		log.Printf("Unconfigured %s: rewriting", fileName)
 		return nil, rewrite(fileName, c)
 	}
 	return c, nil
@@ -69,12 +73,14 @@ func rewrite(fileName string, c *gohci.WorkerConfig) error {
 }
 
 func loadProjectConfig(fileName string) *gohci.ProjectConfig {
-	if b, err := ioutil.ReadFile(fileName); err == nil {
+	b, err := ioutil.ReadFile(fileName)
+	if err == nil {
 		p := &gohci.ProjectConfig{}
 		if err = yaml.Unmarshal(b, p); err == nil && p.Version == 1 {
 			// TODO(maruel): Validate.
 			return p
 		}
 	}
+	log.Printf("Failed to load %s: %s", fileName, err)
 	return nil
 }
