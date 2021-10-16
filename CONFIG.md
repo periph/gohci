@@ -209,7 +209,7 @@ status](https://help.github.com/articles/about-statuses/):
 Visit to `github.com/<user>/<repo>/settings/hooks` and create a new webhook.
 
 - Payload URL: Use your worker IP address or hostname as the hook URL,
-  `https://1.2.3.4/gohci/workerA?altPath=foo.io/x/project&superusers=user1,user2,user3`.
+  `https://1.2.3.4/gohci/workerA?altPath=foo.io/x/project&superUsers=user1,user2,user3`.
   - `altPath`: Set it when using [canonical import
     path](https://golang.org/doc/go1.4#canonicalimports). For example,
     `periph.io/x/gohci`. Leave it unspecified otherwise, which should be the

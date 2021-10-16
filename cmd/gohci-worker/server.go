@@ -273,12 +273,14 @@ func validateArgs(values url.Values) (string, []string, error) {
 	if strings.Contains(altPath, "//") || strings.Contains(altPath, "..") {
 		return "", nil, fmt.Errorf("invalid altPath %q: contains invalid characters", altPath)
 	}
-	u, err := url.Parse("https://" + altPath)
-	if err != nil {
-		return "", nil, fmt.Errorf("invalid altPath %q: %v", altPath, err)
-	}
-	if u.Scheme != "https" || u.User != nil || u.Host == "" || u.Path == "" || u.RawQuery != "" || u.Fragment != "" {
-		return "", nil, fmt.Errorf("invalid altPath %q: unexpected url format", altPath)
+	if len(altPath) > 0 {
+		u, err := url.Parse("https://" + altPath)
+		if err != nil {
+			return "", nil, fmt.Errorf("invalid altPath %q: %v", altPath, err)
+		}
+		if u.Scheme != "https" || u.User != nil || u.Host == "" || u.Path == "" || u.RawQuery != "" || u.Fragment != "" {
+			return "", nil, fmt.Errorf("invalid altPath %q: unexpected url format", altPath)
+		}
 	}
 	var superUsers []string
 	for _, v := range values["superUsers"] {
