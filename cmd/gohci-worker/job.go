@@ -85,6 +85,7 @@ func getCmd(path string, cmd []string) *exec.Cmd {
 			_ = os.Setenv("PATH", oldpath)
 		}()
 	}
+	/* #nosec G204 */
 	return exec.Command(cmd[0], cmd[1:]...)
 }
 

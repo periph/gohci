@@ -24,6 +24,7 @@ func SetConsoleTitle(title string) error {
 	if err != nil {
 		return err
 	}
+	/* #nosec G103 */
 	_, _, errno := syscall.Syscall(p, 1, uintptr(unsafe.Pointer(s)), 0, 0)
 	return syscall.Errno(errno)
 }

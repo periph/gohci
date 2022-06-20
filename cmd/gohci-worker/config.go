@@ -27,6 +27,7 @@ func loadConfig(fileName string) (*gohci.WorkerConfig, error) {
 		Port:              8080,
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
 	}
+	/* #nosec G304 */
 	b, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		log.Printf("Failed to read: %s", err)
@@ -73,6 +74,7 @@ func rewrite(fileName string, c *gohci.WorkerConfig) error {
 }
 
 func loadProjectConfig(fileName string) *gohci.ProjectConfig {
+	/* #nosec G304 */
 	b, err := ioutil.ReadFile(fileName)
 	if err == nil {
 		p := &gohci.ProjectConfig{}
