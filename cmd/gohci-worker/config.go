@@ -9,7 +9,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"runtime"
@@ -28,7 +27,7 @@ func loadConfig(fileName string) (*gohci.WorkerConfig, error) {
 		Oauth2AccessToken: "Get one at https://github.com/settings/tokens",
 	}
 	/* #nosec G304 */
-	b, err := ioutil.ReadFile(fileName)
+	b, err := os.ReadFile(fileName)
 	if err != nil {
 		log.Printf("Failed to read: %s", err)
 		return nil, rewrite(fileName, c)
@@ -67,7 +66,7 @@ func rewrite(fileName string, c *gohci.WorkerConfig) error {
 	if runtime.GOOS == "windows" {
 		b = bytes.Replace(b, []byte("\n"), []byte("\r\n"), -1)
 	}
-	if err = ioutil.WriteFile(fileName, b, 0600); err != nil {
+	if err = os.WriteFile(fileName, b, 0600); err != nil {
 		return err
 	}
 	return fmt.Errorf("wrote new %s", fileName)
@@ -75,7 +74,7 @@ func rewrite(fileName string, c *gohci.WorkerConfig) error {
 
 func loadProjectConfig(fileName string) *gohci.ProjectConfig {
 	/* #nosec G304 */
-	b, err := ioutil.ReadFile(fileName)
+	b, err := os.ReadFile(fileName)
 	if err == nil {
 		p := &gohci.ProjectConfig{}
 		if err = yaml.Unmarshal(b, p); err == nil && p.Version == 1 {

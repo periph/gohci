@@ -9,7 +9,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 
@@ -32,7 +31,7 @@ func mainImpl() error {
 		return errors.New("pass only one argument")
 	}
 
-	b, err := ioutil.ReadFile(filepath.Join(f, ".gohci.yml"))
+	b, err := os.ReadFile(filepath.Join(f, ".gohci.yml"))
 	if err != nil {
 		return err
 	}

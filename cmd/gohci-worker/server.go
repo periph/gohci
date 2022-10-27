@@ -42,7 +42,11 @@ func runServer(c *gohci.WorkerConfig, wkr worker, fileName string) error {
 
 	s := &server{c: c, w: wkr, start: time.Now()}
 	http.Handle("/", s)
-	go http.ListenAndServe(a, nil)
+	srv := &http.Server{
+		Addr:              a,
+		ReadHeaderTimeout: 6 * time.Second,
+	}
+	go srv.ListenAndServe()
 
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
